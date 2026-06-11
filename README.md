@@ -6,6 +6,8 @@
 
 **The betting system that talks me out of betting.** A daily-digest engine for the 2026 World Cup that lands in your Telegram every evening — LLM tactical briefs cross-examined by a Dixon-Coles model and the de-vigged betting market, score "sniffs" with honest probabilities, injury radar, and last-round qualification incentives. Built **enjoyment-first**: its own backtests refuted the edges it hoped for, and it says so in every digest.
 
+> **38 AI agents audited this system the night before kickoff — 26 verified findings, all public** in [TUIYAN_AUDIT_20260610.md](TUIYAN_AUDIT_20260610.md): a rare field log of how LLM sports analysis actually fails (template collapse, stale caches, fact-supply gaps) and the engineering that counters it.
+
 **一个劝我别下注的下注系统。** 每晚推送到 Telegram 的世界杯每日简报:LLM 战术推演 × Dixon-Coles 量化模型 × 去水市场盘口三方对照、带概率的比分嗅觉、伤病雷达、末轮出线利益探测。定位**娱乐优先**——它自己的回测否定了主盘 edge,而且每天的简报里都直说。
 
 ## What lands in your Telegram / 每晚推送长这样
@@ -51,7 +53,7 @@ Python · SQLite · Dixon-Coles (1997) with Elo-anchored ridge prior & friendly 
 ## Quickstart
 
 ```bash
-git clone <this repo> && cd worldcup
+git clone https://github.com/tupils1/worldcup2026-companion.git && cd worldcup2026-companion
 python -m venv .venv && .venv/bin/pip install -e .        # or: uv sync
 
 cp configs/secrets.example.env configs/secrets.env         # fill in your keys
