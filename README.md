@@ -1,8 +1,33 @@
 # ⚽ World Cup 2026 Watching Companion / 世界杯 2026 看球伴侣
 
-A daily-digest engine for the 2026 World Cup that lands in your Telegram every evening — tactical matchup briefs, score "sniffs", injury/news radar, weather lenses, and last-round qualification incentives — built **enjoyment-first**, with quant honesty.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![WC2026](https://img.shields.io/badge/World%20Cup-2026%20live%20now-brightgreen.svg)](#)
 
-每天晚上推送到 Telegram 的世界杯每日简报引擎:战术博弈推演、比分嗅觉、伤病/新闻雷达、天气视角、末轮出线利益探测。定位是**娱乐优先**的看球伴侣,但保持量化层面的诚实。
+**The betting system that talks me out of betting.** A daily-digest engine for the 2026 World Cup that lands in your Telegram every evening — LLM tactical briefs cross-examined by a Dixon-Coles model and the de-vigged betting market, score "sniffs" with honest probabilities, injury radar, and last-round qualification incentives. Built **enjoyment-first**: its own backtests refuted the edges it hoped for, and it says so in every digest.
+
+**一个劝我别下注的下注系统。** 每晚推送到 Telegram 的世界杯每日简报:LLM 战术推演 × Dixon-Coles 量化模型 × 去水市场盘口三方对照、带概率的比分嗅觉、伤病雷达、末轮出线利益探测。定位**娱乐优先**——它自己的回测否定了主盘 edge,而且每天的简报里都直说。
+
+## What lands in your Telegram / 每晚推送长这样
+
+```text
+🌍 世界杯2026 每日雷达  2026-06-11 周四
+数据: 盘口快照 06-11 23:00 · 推演生成 06-11 23:15 (北京时间)
+
+▌06-11 墨西哥(传控渗透) × 南非(均衡) [把握一般]
+  相撞: 墨西哥控球主导,南非收缩防守,墨西哥边路进攻vs南非密集防线。
+  剧本: 墨西哥控球围攻,南非反击机会有限,墨西哥小胜或平局。
+  对位: 墨西哥边锋 vs 南非边后卫:速度突破关键
+  领先后: 墨西哥先进→控节奏小胜;南非先进→全线退守,围攻难破铁桶。
+  总进球: 市场小球(P大球43%) · 战术小球 → ✓战术和市场都看小球——
+         没有下注角度,但剧本一致,放心看
+  比分嗅觉(DC模型): 0-0 21% · 1-0 20% · 1-1 13%
+  角球偏少(南非密集防守,角球机会有限) · 牌偏少(两队风格非侵略性)
+```
+
+Every claim is anchored: market lean comes from de-vigged O/U lines across real books, the model lean from a Dixon-Coles fit with Elo-anchored priors, and the LLM is whitelist-constrained so it can't invent players. When all three agree — it tells you to just enjoy the game.
+
+每个判断都有锚:市场倾向来自多书商去水盘口、模型倾向来自 Elo 先验的 Dixon-Coles、LLM 的对位人名被白名单约束不能编。三方一致时,它会告诉你:安心看球。
 
 ![architecture](architecture.svg)
 
@@ -70,3 +95,7 @@ This is a **watching companion for entertainment and research**, not betting adv
 ## License
 
 MIT © 2026 tupils1
+
+---
+
+*If this made your World Cup nights better (or saved you a bad parlay), a ⭐ helps other fans find it. / 如果它让你的看球夜更有意思(或者拦住了一张糊涂串子),点个 ⭐ 让更多球迷看到。*
