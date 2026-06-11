@@ -1,0 +1,52 @@
+# eloratings.net 2-letter code → FIFA 3-letter code (project canon).
+# Source TSV uses idiosyncratic codes (EN=England, DZ=Algeria, SQ=Scotland, CW=Curaçao).
+# Covers all 48 teams in 2026 FIFA World Cup. Extend as historical opponents appear.
+
+AR: ARG   # Argentina
+AT: AUT   # Austria
+AU: AUS   # Australia
+BA: BIH   # Bosnia and Herzegovina
+BE: BEL   # Belgium
+BR: BRA   # Brazil
+CA: CAN   # Canada
+CD: COD   # DR Congo
+CH: SUI   # Switzerland
+CI: CIV   # Ivory Coast
+CO: COL   # Colombia
+CV: CPV   # Cape Verde
+CW: CUW   # Curaçao
+CZ: CZE   # Czech Republic
+DE: GER   # Germany
+DZ: ALG   # Algeria
+EC: ECU   # Ecuador
+EG: EGY   # Egypt
+EN: ENG   # England
+ES: ESP   # Spain
+FR: FRA   # France
+GH: GHA   # Ghana
+HR: CRO   # Croatia
+HT: HAI   # Haiti
+IQ: IRQ   # Iraq
+IR: IRN   # Iran
+JO: JOR   # Jordan
+JP: JPN   # Japan
+KR: KOR   # South Korea
+MA: MAR   # Morocco
+MX: MEX   # Mexico
+NL: NED   # Netherlands
+"NO": NOR  # Norway — quoted because YAML 1.1 parses bare NO as boolean false
+NZ: NZL   # New Zealand
+PA: PAN   # Panama
+PT: POR   # Portugal
+PY: PAR   # Paraguay
+QA: QAT   # Qatar
+SA: KSA   # Saudi Arabia
+SE: SWE   # Sweden
+SN: SEN   # Senegal
+SQ: SCO   # Scotland
+TN: TUN   # Tunisia
+TR: TUR   # Türkiye
+US: USA   # United States
+UY: URU   # Uruguay
+UZ: UZB   # Uzbekistan
+ZA: RSA   # South Africa

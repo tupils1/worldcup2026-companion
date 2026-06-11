@@ -1,0 +1,41 @@
+# 2026 FIFA World Cup - 48 teams across 12 groups (A..L), 4 teams each.
+# Rule (2023 update): top 2 from each group + 8 best 3rd-place teams advance
+# to a 32-team knockout round.
+#
+# REPLACE THIS FILE with the actual draw result. Save as `teams.yaml`.
+# This template documents the schema only.
+
+tournament:
+  edition: 2026
+  hosts: [USA, CAN, MEX]
+  start_date: 2026-06-11
+  final_date: 2026-07-19
+
+# Each group has 4 teams. Pot indicates FIFA seeding pot (1..4).
+# `home_venue` is which host country's venues the group is mostly played in
+# (matters for travel modeling — Group A always plays in Mexico, e.g.).
+groups:
+  A:
+    home_venue: MEX
+    teams:
+      - {code: MEX, pot: 1}
+      - {code: TBD, pot: 2}
+      - {code: TBD, pot: 3}
+      - {code: TBD, pot: 4}
+  B:
+    home_venue: CAN
+    teams:
+      - {code: TBD, pot: 1}
+      - {code: TBD, pot: 2}
+      - {code: TBD, pot: 3}
+      - {code: TBD, pot: 4}
+  # ... groups C through L follow the same pattern.
+
+# Team metadata keyed by 3-letter ISO code. Used by ingest layer to map across sources.
+teams:
+  MEX:
+    name: "Mexico"
+    confederation: CONCACAF
+    fifa_rank_at_draw: null
+    elo_at_draw: null
+  # ... one entry per qualified team.

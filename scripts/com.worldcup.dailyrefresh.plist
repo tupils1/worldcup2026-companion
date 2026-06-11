@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.worldcup.dailyrefresh</string>
+
+    <!-- Runs the full pipeline + pushes the digest to Telegram. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/path/to/worldcup/scripts/daily_refresh.sh</string>
+        <string>full</string>
+    </array>
+
+    <!-- Fire daily at 23:00 local (Asia/Shanghai) — WC matches kick off in the
+         Beijing early-morning hours, so the digest lands just before watching.
+         If the Mac is asleep, launchd runs it once on the next wake.
+         Edit Hour/Minute to reschedule, then reload. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/path/to/worldcup</string>
+    <key>StandardOutPath</key>
+    <string>/path/to/worldcup/data/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/path/to/worldcup/data/logs/launchd.err.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,23 @@
+# Bookmakers you can ACTUALLY fund + bet from your jurisdiction (The Odds API keys).
+#
+# How it's used by worldcup.strategy.line_shopping:
+#   - CONSENSUS / fair value is ALWAYS read across ALL books (sharpest truth).
+#   - ARBITRAGE legs + BEST-LINE back price + SHOPPING best come ONLY from this list
+#     (you can't bet anywhere else).
+#   - Leave the list EMPTY → RESEARCH mode (scan all books; may show arb you can't take).
+#
+# China-plausible candidates from our current feed — VERIFY EACH yourself (accept
+# CNY/crypto deposit + withdrawal; status changes month to month):
+#   pinnacle      # sharp, does NOT limit winners, USDT deposit (check country/currency in cashier)
+#   onexbet       # 1xBet — Asian/China-facing, crypto + local rails
+#   marathonbet   # accepts many jurisdictions
+#   betonlineag   # offshore (Panama/Curaçao), crypto-friendly
+#   mybookieag    # offshore, crypto-friendly
+#   gtbets        # offshore, crypto
+#   bovada        # offshore (US/intl), crypto
+# DO NOT add betfair_ex_uk/eu/au — geo-locked to China; they are READ-ONLY truth, not bettable.
+#
+# Edit the list below once you've confirmed which you can fund, then re-run line_shopping
+# (or daily_refresh) — it auto-loads this file.
+
+accessible_books: []

@@ -1,0 +1,93 @@
+# 2026 FIFA World Cup — finalized 48-team draw.
+# Draw: 2025-12-05 (Kennedy Center, Washington D.C.)
+# UEFA + Intercontinental playoffs resolved: 2026-03-31
+# Sources cross-verified: NBC Sports, MLSSoccer.com, Wikipedia, FIFA.com
+#
+# 3-letter codes follow FIFA convention (close to but not identical to ISO 3166-1 alpha-3).
+
+tournament:
+  edition: 2026
+  hosts: [USA, CAN, MEX]
+  start_date: 2026-06-11
+  final_date: 2026-07-19
+  total_matches: 104
+  format:
+    group_count: 12
+    teams_per_group: 4
+    group_matches_total: 72   # 12 groups × 6 matches per group
+    advance_top_n_per_group: 2
+    advance_best_thirds: 8
+    knockout_size: 32         # 24 (top-2) + 8 (best-3rd) → Round of 32
+
+# Group draw (each row in pot order: Pot1, Pot2, Pot3, Pot4)
+groups:
+  A: {teams: [MEX, KOR, RSA, CZE]}
+  B: {teams: [CAN, SUI, QAT, BIH]}
+  C: {teams: [BRA, MAR, SCO, HAI]}
+  D: {teams: [USA, AUS, PAR, TUR]}
+  E: {teams: [GER, ECU, CIV, CUW]}
+  F: {teams: [NED, JPN, TUN, SWE]}
+  G: {teams: [BEL, IRN, EGY, NZL]}
+  H: {teams: [ESP, URU, KSA, CPV]}
+  I: {teams: [FRA, SEN, NOR, IRQ]}
+  J: {teams: [ARG, AUT, ALG, JOR]}
+  K: {teams: [POR, COL, UZB, COD]}
+  L: {teams: [ENG, CRO, PAN, GHA]}
+
+# Pre-draw seeding pots (FIFA rankings, Dec 2025)
+pots:
+  1: [USA, MEX, CAN, ESP, ARG, FRA, ENG, BRA, POR, NED, BEL, GER]
+  2: [CRO, MAR, COL, URU, SUI, JPN, SEN, IRN, KOR, ECU, AUT, AUS]
+  3: [NOR, PAN, EGY, ALG, SCO, PAR, TUN, CIV, UZB, QAT, KSA, RSA]
+  4: [JOR, CPV, GHA, CUW, HAI, NZL, BIH, SWE, TUR, CZE, COD, IRQ]
+
+# Team metadata. Use these codes consistently across ingest sources.
+teams:
+  ALG: {name: "Algeria",                confederation: CAF}
+  ARG: {name: "Argentina",              confederation: CONMEBOL}
+  AUS: {name: "Australia",              confederation: AFC}
+  AUT: {name: "Austria",                confederation: UEFA}
+  BEL: {name: "Belgium",                confederation: UEFA}
+  BIH: {name: "Bosnia and Herzegovina", confederation: UEFA, qualified_via: "UEFA playoff Path A"}
+  BRA: {name: "Brazil",                 confederation: CONMEBOL}
+  CAN: {name: "Canada",                 confederation: CONCACAF, role: host}
+  CIV: {name: "Ivory Coast",            confederation: CAF}
+  COD: {name: "DR Congo",               confederation: CAF, qualified_via: "Intercontinental Playoff Path 1"}
+  COL: {name: "Colombia",               confederation: CONMEBOL}
+  CPV: {name: "Cape Verde",             confederation: CAF, notes: "debut"}
+  CRO: {name: "Croatia",                confederation: UEFA}
+  CUW: {name: "Curaçao",                confederation: CONCACAF, notes: "debut"}
+  CZE: {name: "Czech Republic",         confederation: UEFA, qualified_via: "UEFA playoff Path D"}
+  ECU: {name: "Ecuador",                confederation: CONMEBOL}
+  EGY: {name: "Egypt",                  confederation: CAF}
+  ENG: {name: "England",                confederation: UEFA}
+  ESP: {name: "Spain",                  confederation: UEFA}
+  FRA: {name: "France",                 confederation: UEFA}
+  GER: {name: "Germany",                confederation: UEFA}
+  GHA: {name: "Ghana",                  confederation: CAF}
+  HAI: {name: "Haiti",                  confederation: CONCACAF}
+  IRN: {name: "Iran",                   confederation: AFC}
+  IRQ: {name: "Iraq",                   confederation: AFC, qualified_via: "Intercontinental Playoff Path 2"}
+  JOR: {name: "Jordan",                 confederation: AFC, notes: "debut"}
+  JPN: {name: "Japan",                  confederation: AFC}
+  KOR: {name: "South Korea",            confederation: AFC}
+  KSA: {name: "Saudi Arabia",           confederation: AFC}
+  MAR: {name: "Morocco",                confederation: CAF}
+  MEX: {name: "Mexico",                 confederation: CONCACAF, role: host}
+  NED: {name: "Netherlands",            confederation: UEFA}
+  NOR: {name: "Norway",                 confederation: UEFA}
+  NZL: {name: "New Zealand",            confederation: OFC}
+  PAN: {name: "Panama",                 confederation: CONCACAF}
+  PAR: {name: "Paraguay",               confederation: CONMEBOL}
+  POR: {name: "Portugal",               confederation: UEFA}
+  QAT: {name: "Qatar",                  confederation: AFC}
+  RSA: {name: "South Africa",           confederation: CAF}
+  SCO: {name: "Scotland",               confederation: UEFA}
+  SEN: {name: "Senegal",                confederation: CAF}
+  SUI: {name: "Switzerland",            confederation: UEFA}
+  SWE: {name: "Sweden",                 confederation: UEFA, qualified_via: "UEFA playoff Path B"}
+  TUN: {name: "Tunisia",                confederation: CAF}
+  TUR: {name: "Türkiye",                confederation: UEFA, qualified_via: "UEFA playoff Path C"}
+  URU: {name: "Uruguay",                confederation: CONMEBOL}
+  USA: {name: "United States",          confederation: CONCACAF, role: host}
+  UZB: {name: "Uzbekistan",             confederation: AFC, notes: "debut"}

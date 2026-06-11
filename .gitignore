@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# venv
+.venv/
+venv/
+
+# secrets
+.env
+configs/secrets.env
+configs/*.local.*
+
+# data (large + scrape outputs)
+data/raw/
+data/processed/
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+*.feather
+
+# notebooks
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# logs
+*.log
+logs/
+
+# tool / scrape artifacts (generated, not source)
+.playwright-mcp/
+data/scraped/
+data/logs/
+oddsportal-wc2026.png
+
+# personal operating docs (real-money plans & SOP) — local only, never published
+WC2026_FUN_PLAN.md
+JUNE_BLOWOUT_PLAYBOOK.md
+OPERATIONS.md

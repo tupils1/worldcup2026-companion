@@ -1,0 +1,9 @@
+# Source-name → FIFA code, ALIASES ONLY (when source's name differs from teams.yaml).
+# Only map to codes that exist in the teams table to avoid FK failures.
+# Extend (with corresponding teams-table inserts) when richer history is needed.
+
+Turkey: TUR             # martj42 + many sources still use pre-2022 name
+Czechia: CZE            # alt spelling
+"Korea Republic": KOR   # FIFA-formal alternative to "South Korea"
+"Cabo Verde": CPV
+"Côte d'Ivoire": CIV
