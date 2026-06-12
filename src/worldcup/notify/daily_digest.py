@@ -180,14 +180,20 @@ def tactics_block(conn, limit: int = 4) -> list[str]:
     Joins daily_tactics (date/leans/verdict) with match_tactics (the full推演 prose:
     clash / script / swing factor / per-prop reasons) for a detailed per-fixture block."""
     try:
+        # Only fixtures that haven't kicked off yet. Prefer the precise kickoff_utc
+        # (so a match already played today drops off); fall back to the date for any
+        # row still missing a kickoff time.
         rows = conn.execute("""
             SELECT d.home, d.away, d.match_date, d.arch_h, d.arch_a, d.q_lean, d.t_tg,
                    d.agree, d.corners, d.cards, d.conf, d.m_tg, d.m_pover, d.top_scores,
                    t.payload
             FROM daily_tactics d LEFT JOIN match_tactics t
               ON t.home = d.home AND t.away = d.away
-            WHERE d.match_date >= date('now')
-            ORDER BY d.match_date LIMIT ?""", (limit,)).fetchall()
+            LEFT JOIN matches m
+              ON m.home_code = d.home AND m.away_code = d.away AND m.match_date = d.match_date
+            WHERE COALESCE(m.finished, 0) = 0
+              AND COALESCE(m.kickoff_utc, d.match_date || 'T23:59:00+00:00') >= strftime('%Y-%m-%dT%H:%M:%S+00:00','now')
+            ORDER BY COALESCE(m.kickoff_utc, d.match_date) LIMIT ?""", (limit,)).fetchall()
     except Exception:
         return []  # tables not created yet (scout --daily never run)
     out: list[str] = []
@@ -315,6 +321,44 @@ def _freshness_lines(conn) -> list[str]:
     return out
 
 
+def review_block(conn, limit: int = 6) -> list[str]:
+    """昨日对答案 — graded 推演 vs reality + a cumulative scoreboard.
+    Reads tactics_review (written by eval.tactics_review). Empty when no WC fixture
+    has finished yet, in which case compose() omits the whole section."""
+    try:
+        from worldcup.eval.tactics_review import scoreboard
+        rows = conn.execute("""SELECT * FROM tactics_review
+            WHERE match_date >= date('now', '-2 day')
+            ORDER BY match_date DESC, reviewed_at DESC LIMIT ?""", (limit,)).fetchall()
+    except Exception:
+        return []  # table not created yet (review never run)
+    if not rows:
+        return []
+
+    def mk(hit):
+        return {1: "✓", 0: "✗"}.get(hit, "—")
+
+    out: list[str] = []
+    for r in rows:
+        head = f"▌{team_zh(r['home'])} {r['home_score']}-{r['away_score']} {team_zh(r['away'])}"
+        tg = (f"总进球{r['total_goals']}: 战术{lean_zh(r['t_tg'])}{mk(r['hit_t'])} "
+              f"模型{lean_zh(r['q_lean'])}{mk(r['hit_q'])} 市场{lean_zh(r['m_tg'])}{mk(r['hit_m'])}")
+        out.append(f"{head} │ {tg}")
+        extras = []
+        if r["total_corners"] is not None:
+            extras.append(f"角球{r['total_corners']} {lean_zh(r['corners_lean'])}{mk(r['hit_corners'])}")
+        if r["total_cards"] is not None:
+            extras.append(f"牌{r['total_cards']} {lean_zh(r['cards_lean'])}{mk(r['hit_cards'])}")
+        if extras:
+            out.append("  " + " · ".join(extras))
+    sb = scoreboard(conn)
+    tg_board = " · ".join(f"{k} {h}/{g}" for k, (h, g) in sb.items()
+                          if g and k in ("战术", "模型", "市场"))
+    if tg_board:
+        out.append(f"累计总进球命中: {tg_board}")
+    return out
+
+
 def compose(bets_log: str = "") -> str:
     log = ""
     if bets_log and Path(bets_log).exists():
@@ -324,6 +368,7 @@ def compose(bets_log: str = "") -> str:
         news, watch, tactics = news_rows(conn), watch_rows(conn), tactics_block(conn)
         md3 = md3_lines(conn)
         fresh = _freshness_lines(conn)
+        review = review_block(conn)
     finally:
         conn.close()
 
@@ -337,6 +382,8 @@ def compose(bets_log: str = "") -> str:
         parts.append("")
 
     # 娱乐优先(B):先放看球用的战术/新闻;EV-grind 的跨书套利已撤。
+    if review:  # 只在有已完赛的 WC 比赛后出现
+        add("── 昨日对答案 (推演 vs 实际;对了不吹,错了认账)──", review, "")
     add("── 战术推演 (打法/剧本/变量;⚑分歧才有下注角度)──", tactics, "窗口内无 WC 比赛")
     add("── 末轮出线利益 (默契平/生死对攻/走过场 → 总进球)──", md3, "待小组前两轮打完后激活")
     add("── 新闻 / 伤病 / 硬缺阵 ──", news, "近期无 严重度≥4 伤病/缺阵")

@@ -80,6 +80,10 @@ def _parse_team_stats(stats: list[dict]) -> dict[str, Any]:
         "shots_outside_box": outside,
         "possession_pct": _coerce_pct(_stat_value(stats, "Ball Possession")),
         "xg_proxy": XG_INSIDE_BOX * inside + XG_OUTSIDE_BOX * outside,
+        # corners / cards: the actuals the nightly 推演复盘 (对答案) grades against
+        "corners": _coerce_int(_stat_value(stats, "Corner Kicks")),
+        "yellows": _coerce_int(_stat_value(stats, "Yellow Cards")),
+        "reds": _coerce_int(_stat_value(stats, "Red Cards")),
     }
 
 
@@ -98,6 +102,15 @@ def ingest_match_statistics(
     own_client = client is None
     client = client or APIFootballClient()
     conn = get_conn(db_path)
+
+    # migrate: per-team corners/cards actuals (feed the nightly review loop)
+    for col in ("home_corners", "away_corners", "home_yellows", "away_yellows",
+                "home_reds", "away_reds"):
+        try:
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {col} INTEGER")
+        except Exception:
+            pass
+    conn.commit()
 
     where = ["api_football_id IS NOT NULL"]
     if only_finished:
@@ -170,7 +183,10 @@ def ingest_match_statistics(
                     home_shots = ?, home_shots_on_target = ?,
                     away_shots = ?, away_shots_on_target = ?,
                     home_possession_pct = ?,
-                    home_xg = ?, away_xg = ?
+                    home_xg = ?, away_xg = ?,
+                    home_corners = ?, away_corners = ?,
+                    home_yellows = ?, away_yellows = ?,
+                    home_reds = ?, away_reds = ?
                 WHERE id = ?
                 """,
                 (
@@ -178,6 +194,9 @@ def ingest_match_statistics(
                     away_stats["shots"], away_stats["shots_on_target"],
                     home_stats["possession_pct"],
                     home_stats["xg_proxy"], away_stats["xg_proxy"],
+                    home_stats["corners"], away_stats["corners"],
+                    home_stats["yellows"], away_stats["yellows"],
+                    home_stats["reds"], away_stats["reds"],
                     row["id"],
                 ),
             )

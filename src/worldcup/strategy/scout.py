@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import re
 import sqlite3
@@ -95,9 +96,19 @@ def team_anchors(conn: sqlite3.Connection, code: str) -> tuple[str, list[str]]:
 def generate_profile(conn: sqlite3.Connection, code: str, key: str, model: str,
                      force: bool = False) -> dict | None:
     if not force:
-        cur = conn.execute("SELECT payload FROM team_profiles WHERE team_code=?", (code,)).fetchone()
+        cur = conn.execute("SELECT payload, generated_at FROM team_profiles WHERE team_code=?",
+                           (code,)).fetchone()
         if cur:
-            return json.loads(cur["payload"])
+            # During the tournament a profile goes stale the moment the team plays:
+            # form, confidence and the goals-lean all shift with real results. Treat
+            # "team has a finished match on/after the profile's generation date" as
+            # a cache miss (≤1 extra LLM call per team per match played).
+            last = conn.execute("""SELECT MAX(match_date) FROM matches
+                                   WHERE finished=1 AND (home_code=? OR away_code=?)""",
+                                (code, code)).fetchone()[0]
+            if not (last and last >= (cur["generated_at"] or "")[:10]):
+                return json.loads(cur["payload"])
+            print(f"  [{code}] 档案过期(赛后) → 重新生成")
     elo_s, anchors = team_anchors(conn, code)
     anchor_txt = "; ".join(anchors) if anchors else "（数据库无近期出场记录）"
     user = (f"国家队代码 {code} = {CODE_ZH.get(code, code)}。Elo≈{elo_s}。"
@@ -268,21 +279,36 @@ def _team_absences(conn, code: str, limit: int = 4) -> list[str]:
 
 
 def _team_form(conn, code: str, n: int = 5) -> str:
-    """Last n finished results from this team's view: '近5场 胜平负进失'."""
+    """Last n finished results from this team's view, plus per-match detail (score,
+    opponent, xG proxy) for THIS tournament's games — '谁在怎么赢' beats bare W/D/L."""
     try:
         rows = conn.execute("""
-            SELECT home_code h, away_code a, home_score hs, away_score as_
+            SELECT home_code h, away_code a, home_score hs, away_score as_,
+                   home_xg hx, away_xg ax, match_date d
             FROM matches WHERE finished = 1 AND home_score IS NOT NULL
               AND (home_code = ? OR away_code = ?)
             ORDER BY match_date DESC LIMIT ?""", (code, code, n)).fetchall()
     except Exception:
         return ""
     wdl, gf, ga = [], 0, 0
+    wc_lines: list[str] = []
     for r in rows:
-        f, ag = (r["hs"], r["as_"]) if r["h"] == code else (r["as_"], r["hs"])
+        home_side = r["h"] == code
+        f, ag = (r["hs"], r["as_"]) if home_side else (r["as_"], r["hs"])
         gf += f; ga += ag
-        wdl.append("胜" if f > ag else ("平" if f == ag else "负"))
-    return f"近{len(wdl)}场 {''.join(wdl)} 进{gf}失{ga}" if wdl else ""
+        res = "胜" if f > ag else ("平" if f == ag else "负")
+        wdl.append(res)
+        if (r["d"] or "") >= "2026-06-11":   # this World Cup → full detail with xG
+            opp = r["a"] if home_side else r["h"]
+            fx, agx = (r["hx"], r["ax"]) if home_side else (r["ax"], r["hx"])
+            xs = f"(xG {fx:.1f}-{agx:.1f})" if fx is not None and agx is not None else ""
+            wc_lines.append(f"{f}-{ag}{res}{CODE_ZH.get(opp, opp)}{xs}")
+    if not wdl:
+        return ""
+    s = f"近{len(wdl)}场 {''.join(wdl)} 进{gf}失{ga}"
+    if wc_lines:
+        s += " · 本届已赛: " + "、".join(reversed(wc_lines))
+    return s
 
 
 def _match_id(conn, home: str, away: str):
@@ -381,13 +407,19 @@ def generate_matchup(conn, home, away, ph, pa, key, model, force=False) -> dict 
     if not (ph and pa):
         return None
     abs_h, abs_a = _team_absences(conn, home), _team_absences(conn, away)
-    sig = "|".join(sorted(abs_h)) + "##" + "|".join(sorted(abs_a))
+    form_h, form_a = _team_form(conn, home), _team_form(conn, away)
+    wx = _fixture_weather(conn, home, away)
+    # Cache key covers EVERYTHING the prompt sees: absences + recent form + weather.
+    # The old absences-only signature kept serving pre-tournament briefs all tournament
+    # long — form changes after every round and forecasts update daily. Old plaintext
+    # signatures never match the new hash, so each fixture re-generates exactly once.
+    sig = hashlib.md5(("|".join(sorted(abs_h)) + "##" + "|".join(sorted(abs_a))
+                       + "##" + form_h + "##" + form_a + "##" + wx).encode()).hexdigest()
     if not force:
         cur = conn.execute("SELECT payload, absences_sig FROM match_tactics WHERE home=? AND away=?",
                            (home, away)).fetchone()
-        if cur and (cur["absences_sig"] or "") == sig:  # cache valid only while absences unchanged
+        if cur and (cur["absences_sig"] or "") == sig:
             return json.loads(cur["payload"])
-    form_h, form_a = _team_form(conn, home), _team_form(conn, away)
     roster_h, roster_a = _roster_whitelist(conn, home, ph), _roster_whitelist(conn, away, pa)
 
     def blk(code, prof, ab, fm, roster):
@@ -397,7 +429,6 @@ def generate_matchup(conn, home, away, ph, pa, key, model, force=False) -> dict 
         d["锚定球员(对位人名只能逐字从中选)"] = roster or "无 → 对位只写位置"
         return f"{code}: {json.dumps(d, ensure_ascii=False)}"
 
-    wx = _fixture_weather(conn, home, away)
     head = (f"本场对阵: 主队 {home}={CODE_ZH.get(home, home)} vs 客队 {away}={CODE_ZH.get(away, away)}"
             "(队名以此为准,勿写成任何其他国家队)")
     user = (head + "\n主队 " + blk(home, ph, abs_h, form_h, roster_h)
@@ -567,6 +598,12 @@ def daily_briefs(days_ahead: int = 3, db_path=DEFAULT_DB_PATH, force: bool = Fal
         print("⚠️  DEEPSEEK_API_KEY 未设置。"); return
     conn = get_conn(db_path)
     ensure_table(conn); ensure_matchup_table(conn); ensure_daily_table(conn)
+    # Hygiene: drop cached matchups that have no UPCOMING fixture (test leftovers and
+    # already-played rows), so a future real pairing can never hit a stale cache.
+    conn.execute("""DELETE FROM match_tactics WHERE NOT EXISTS (
+        SELECT 1 FROM matches m WHERE m.home_code = match_tactics.home
+          AND m.away_code = match_tactics.away AND m.finished = 0)""")
+    conn.commit()
     today = dt.date.today()
     lo, hi = today.isoformat(), (today + dt.timedelta(days=days_ahead)).isoformat()
     fx = conn.execute("""SELECT home_code h, away_code a, match_date d FROM matches

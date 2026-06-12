@@ -49,11 +49,13 @@ if [[ "$MODE" != "--outright-only" ]]; then
     log "[3/5] API-Football fixtures + WC2026"
     $PY -m worldcup.ingest.api_football >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 
-    if [[ "$MODE" != "--quick" ]]; then
-        log "[4/5] xG proxy for new finished matches"
+    # During the tournament (>=06-12) ALWAYS pull post-match stats even in --quick:
+    # xG/corners/cards are the data source for the nightly 对答案 review loop.
+    if [[ "$MODE" != "--quick" || "$(date +%F)" > "2026-06-11" ]]; then
+        log "[4/5] post-match stats (xG proxy + corners/cards) for finished matches"
         $PY -m worldcup.ingest.api_football_stats >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
     else
-        log "[4/5] xG proxy — SKIPPED (--quick)"
+        log "[4/5] post-match stats — SKIPPED (--quick, pre-tournament)"
     fi
 fi
 
@@ -130,7 +132,10 @@ log "Full log:               $FULL_LOG"
 log "[13a] API-Football structured injuries (paid /injuries → injuries table; feeds 推演 absences)"
 $PY -m worldcup.ingest.api_football_squad >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 
-log "[13b] Scout tactical briefs for upcoming WC fixtures (DeepSeek; market OU + injuries-grounded → daily_tactics)"
+log "[13b] 昨日对答案: grade finished 推演 vs reality → tactics_review"
+$PY -m worldcup.eval.tactics_review >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
+
+log "[13c] Scout tactical briefs for upcoming WC fixtures (DeepSeek; market OU + injuries-grounded → daily_tactics)"
 $PY -m worldcup.strategy.scout --daily --days 3 >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 
 DIGEST="$LOG_DIR/$TS-digest.txt"
