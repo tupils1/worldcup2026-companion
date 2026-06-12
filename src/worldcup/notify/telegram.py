@@ -72,10 +72,36 @@ def _chunks(text: str, n: int = CHUNK) -> list[str]:
     return out or [""]
 
 
+def _chunks_html(text: str, n: int = CHUNK) -> list[str]:
+    """Split an HTML digest on blank-line (card/section) boundaries so a chunk never
+    cuts through a <blockquote> or other tag. Each block is self-contained HTML; if a
+    single block somehow exceeds n it's emitted whole (Telegram will reject only that
+    one — acceptable vs. splitting mid-tag and corrupting every following message)."""
+    blocks = text.split("\n\n")
+    out: list[str] = []
+    buf = ""
+    for blk in blocks:
+        cand = blk if not buf else buf + "\n\n" + blk
+        if len(cand) > n and buf:
+            out.append(buf)
+            buf = blk
+        else:
+            buf = cand
+    if buf:
+        out.append(buf)
+    return out or [""]
+
+
 def send_message(text: str, *, token: str | None = None, chat_id: str | None = None,
-                 silent: bool = False, as_code: bool = True) -> tuple[bool, str]:
+                 silent: bool = False, as_code: bool = True,
+                 as_html: bool = False) -> tuple[bool, str]:
     """Send `text` to the configured chat. Returns (ok, human_message).
 
+    Three modes:
+      as_html=True  → text is already Telegram HTML (cards/blockquotes); send as-is,
+                      chunked on card boundaries. (the rich digest)
+      as_code=True  → wrap each chunk in <pre> monospace (the legacy aligned tables).
+      else          → plain text.
     ok=False with a 'not set' message means it was skipped (unconfigured), which
     callers in the daily pipeline treat as a no-op rather than an error."""
     token = token or _secret("TELEGRAM_BOT_TOKEN")
@@ -83,16 +109,21 @@ def send_message(text: str, *, token: str | None = None, chat_id: str | None = N
     if not token or not chat_id:
         return False, "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — skipped (no-op)."
 
-    parts = _chunks(text)
+    parts = _chunks_html(text) if as_html else _chunks(text)
     for i, part in enumerate(parts, 1):
-        body = f"<pre>{html.escape(part)}</pre>" if as_code else part
+        if as_html:
+            body = part
+        elif as_code:
+            body = f"<pre>{html.escape(part)}</pre>"
+        else:
+            body = part
         payload = {
             "chat_id": chat_id,
             "text": body,
             "disable_web_page_preview": True,
             "disable_notification": silent,
         }
-        if as_code:
+        if as_code or as_html:
             payload["parse_mode"] = "HTML"
         # Retry transient network / 5xx blips (we have hit SSL EOF in the wild);
         # bail immediately on 4xx (bad token/chat — retrying won't help).
@@ -165,6 +196,8 @@ def main() -> None:
     src.add_argument("--text", help="inline message body")
     ap.add_argument("--silent", action="store_true", help="deliver without notification sound")
     ap.add_argument("--plain", action="store_true", help="send as plain text (no <pre> monospace)")
+    ap.add_argument("--html", action="store_true",
+                    help="body is already Telegram HTML (cards/blockquotes); send as-is")
     ap.add_argument("--get-chat-id", action="store_true",
                     help="discover your chat id from recent messages to the bot")
     ap.add_argument("--test", action="store_true", help="send a one-line test ping")
@@ -184,7 +217,8 @@ def main() -> None:
     else:
         text = sys.stdin.read()
 
-    ok, msg = send_message(text, silent=args.silent, as_code=not args.plain)
+    ok, msg = send_message(text, silent=args.silent, as_html=args.html,
+                           as_code=not (args.plain or args.html))
     print(msg)
     # Skipped-because-unconfigured is a clean no-op (exit 0); real failures exit 1.
     sys.exit(0 if (ok or "not set" in msg) else 1)

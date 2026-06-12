@@ -138,12 +138,19 @@ $PY -m worldcup.eval.tactics_review >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED 
 log "[13c] Scout tactical briefs for upcoming WC fixtures (DeepSeek; market OU + injuries-grounded → daily_tactics)"
 $PY -m worldcup.strategy.scout --daily --days 3 >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 
+# Plain digest → console + log file (human-readable archive).
 DIGEST="$LOG_DIR/$TS-digest.txt"
 $PY -m worldcup.notify.daily_digest "$BETS_LOG" | tee "$DIGEST"
 
-# Push to Telegram (cleanly no-ops if TELEGRAM_* unset in configs/secrets.env)
-if $PY -m worldcup.notify.telegram --file "$DIGEST" >> "$FULL_LOG" 2>&1; then
-    log "Telegram digest pushed (or skipped if unconfigured)."
+# HTML digest (expandable cards) for the Telegram push; fall back to plain on any
+# failure so a markup bug can never cost us the digest (HTML rendering can't be
+# verified headlessly — the plain push is the safety net).
+DIGEST_HTML="$LOG_DIR/$TS-digest.html"
+$PY -m worldcup.notify.daily_digest "$BETS_LOG" --html > "$DIGEST_HTML"
+if $PY -m worldcup.notify.telegram --file "$DIGEST_HTML" --html >> "$FULL_LOG" 2>&1; then
+    log "Telegram digest pushed (HTML cards; or skipped if unconfigured)."
+elif $PY -m worldcup.notify.telegram --file "$DIGEST" --plain >> "$FULL_LOG" 2>&1; then
+    log "⚠ HTML push failed — fell back to plain text (check markup)."
 else
-    log "⚠ Telegram push FAILED — see $FULL_LOG."
+    log "⚠ Telegram push FAILED (both HTML and plain) — see $FULL_LOG."
 fi

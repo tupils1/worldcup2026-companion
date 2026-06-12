@@ -81,6 +81,22 @@ def lean_zh(v: str | None) -> str:
     return LEAN_ZH.get(v or "", v or "—")
 
 
+_CN_TZ = dt.timezone(dt.timedelta(hours=8))
+_WD = "一二三四五六日"
+
+
+def kickoff_cn(kickoff_utc: str | None, match_date: str) -> str:
+    """Kickoff in Beijing time — the watcher's first question is '今晚几点'.
+    '06-12 周五 03:00' from a full ISO kickoff, or just the date if none."""
+    if kickoff_utc:
+        try:
+            d = dt.datetime.fromisoformat(kickoff_utc).astimezone(_CN_TZ)
+            return f"{d:%m-%d} 周{_WD[d.weekday()]} {d:%H:%M}"
+        except (ValueError, TypeError):
+            pass
+    return (match_date or "")[5:]
+
+
 def team_zh(code: str | None) -> str:
     return CODE_ZH.get(code or "", code or "?")
 
@@ -186,7 +202,7 @@ def tactics_block(conn, limit: int = 4) -> list[str]:
         rows = conn.execute("""
             SELECT d.home, d.away, d.match_date, d.arch_h, d.arch_a, d.q_lean, d.t_tg,
                    d.agree, d.corners, d.cards, d.conf, d.m_tg, d.m_pover, d.top_scores,
-                   t.payload
+                   m.kickoff_utc, t.payload
             FROM daily_tactics d LEFT JOIN match_tactics t
               ON t.home = d.home AND t.away = d.away
             LEFT JOIN matches m
@@ -206,7 +222,7 @@ def tactics_block(conn, limit: int = 4) -> list[str]:
                 mu = {}
         bet = mu.get("betting", {})
         gs = mu.get("game_states", {})
-        md = (r["match_date"] or "")[5:]
+        md = kickoff_cn(r["kickoff_utc"], r["match_date"])
         cv = r["conf"]
         conf = ("" if cv is None else
                 "[把握较高]" if cv >= 0.75 else ("[把握一般]" if cv >= 0.55 else "[纯参考]"))
@@ -359,7 +375,54 @@ def review_block(conn, limit: int = 6) -> list[str]:
     return out
 
 
-def compose(bets_log: str = "") -> str:
+def _esc(s: str) -> str:
+    """Escape for Telegram HTML (only & < > are special in text nodes)."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _spoiler_scores(line: str) -> str:
+    """Wrap the score list of a 比分嗅觉 line in a spoiler (escaped), keep label plain."""
+    label, sep, scores = line.partition(": ")
+    if not sep:
+        return _esc(line)
+    return f"{_esc(label)}: <tg-spoiler>{_esc(scores)}</tg-spoiler>"
+
+
+def _html_card_section(title: str, lines: list[str]) -> list[str]:
+    """Render the tactics section as Telegram cards: bold header per fixture, the rest
+    folded into an <blockquote expandable>. Each card (header + its blockquote) is one
+    block separated by a blank line, so _chunks_html can split BETWEEN cards but never
+    inside one (header and its blockquote stay together). Cards split on the '▌' marker."""
+    out = [f"<b>{_esc(title)}</b>", ""]   # title is its own block
+    header: str | None = None
+    detail: list[str] = []
+
+    def flush():
+        nonlocal header
+        if header is None:
+            return
+        card = header
+        if detail:
+            card += "\n<blockquote expandable>" + "\n".join(detail) + "</blockquote>"
+        out.append(card)
+        out.append("")                   # blank line → card boundary for chunking
+        header, detail[:] = None, []
+
+    for ln in lines:
+        if ln.startswith("▌"):
+            flush()
+            header = f"<b>{_esc(ln)}</b>"
+        elif ln.strip() == "":
+            continue
+        elif header is not None:
+            detail.append(_spoiler_scores(ln) if "比分嗅觉" in ln else _esc(ln))
+        else:                            # e.g. the "窗口内无 WC 比赛" empty placeholder
+            out.append(_esc(ln)); out.append("")
+    flush()
+    return out
+
+
+def compose(bets_log: str = "", html: bool = False) -> str:
     log = ""
     if bets_log and Path(bets_log).exists():
         log = Path(bets_log).read_text(errors="ignore")
@@ -374,32 +437,50 @@ def compose(bets_log: str = "") -> str:
 
     today = dt.date.today()
     wd = "一二三四五六日"[today.weekday()]  # Mon=0 … Sun=6
-    parts = [f"🌍 世界杯2026 每日雷达  {today:%Y-%m-%d} 周{wd}", *fresh, ""]
+    title_line = f"🌍 世界杯2026 每日雷达  {today:%Y-%m-%d} 周{wd}"
 
-    def add(title: str, lines: list[str], empty: str) -> None:
-        parts.append(title)
-        parts.extend(lines if lines else [f"  {empty}"])
-        parts.append("")
-
-    # 娱乐优先(B):先放看球用的战术/新闻;EV-grind 的跨书套利已撤。
+    # Collect sections as (title, lines, empty, is_cards); render plain or HTML.
+    sections: list[tuple[str, list[str], str, bool]] = []
     if review:  # 只在有已完赛的 WC 比赛后出现
-        add("── 昨日对答案 (推演 vs 实际;对了不吹,错了认账)──", review, "")
-    add("── 战术推演 (打法/剧本/变量;⚑分歧才有下注角度)──", tactics, "窗口内无 WC 比赛")
-    add("── 末轮出线利益 (默契平/生死对攻/走过场 → 总进球)──", md3, "待小组前两轮打完后激活")
-    add("── 新闻 / 伤病 / 硬缺阵 ──", news, "近期无 严重度≥4 伤病/缺阵")
-    add("── 内讧/士气(看球谈资,不下注)──", watch, "近 14 天无")
-    add("── 伤病滞后(薄盘未再价,FYI)──", lag_block(log), "无")
+        sections.append(("── 昨日对答案 (推演 vs 实际;对了不吹,错了认账)──", review, "", False))
+    sections.append(("── 战术推演 (打法/剧本/变量;⚑分歧才有下注角度)──", tactics, "窗口内无 WC 比赛", True))
+    sections.append(("── 末轮出线利益 (默契平/生死对攻/走过场 → 总进球)──", md3, "待小组前两轮打完后激活", False))
+    sections.append(("── 新闻 / 伤病 / 硬缺阵 ──", news, "近期无 严重度≥4 伤病/缺阵", False))
+    sections.append(("── 内讧/士气(看球谈资,不下注)──", watch, "近 14 天无", False))
+    sections.append(("── 伤病滞后(薄盘未再价,FYI)──", lag_block(log), "无", False))
     if INCLUDE_POLYMARKET:
-        add("── Polymarket 价差(NO=偏贵该卖 / YES=偏便宜该买;真值=Betfair)──", poly_block(log), "无价差")
+        sections.append(("── Polymarket 价差(NO=偏贵该卖 / YES=偏便宜该买;真值=Betfair)──", poly_block(log), "无价差", False))
     if INCLUDE_ARBITRAGE:
-        add("── 跨书套利 & 最优赔率 ──", arb_block(log), "今日无套利 / 最优线")
-    parts.append("娱乐为主:小注 · 单注优先(串关 EV 最差)· 每注记 CLV · 亏完即止不补仓。")
+        sections.append(("── 跨书套利 & 最优赔率 ──", arb_block(log), "今日无套利 / 最优线", False))
+    footer = "娱乐为主:小注 · 单注优先(串关 EV 最差)· 每注记 CLV · 亏完即止不补仓。"
+
+    if not html:
+        parts = [title_line, *fresh, ""]
+        for ttl, lines, empty, _cards in sections:
+            parts.append(ttl)
+            parts.extend(lines if lines else [f"  {empty}"])
+            parts.append("")
+        parts.append(footer)
+        return "\n".join(parts)
+
+    # HTML render (Telegram parse_mode=HTML): bold headers, tactical cards folded.
+    parts = [f"<b>{_esc(title_line)}</b>", *[_esc(f) for f in fresh], ""]
+    for ttl, lines, empty, cards in sections:
+        if cards:
+            parts.extend(_html_card_section(ttl, lines or [f"  {empty}"]))
+        else:
+            parts.append(f"<b>{_esc(ttl)}</b>")
+            parts.extend(_esc(l) for l in (lines if lines else [f"  {empty}"]))
+            parts.append("")
+    parts.append(f"<i>{_esc(footer)}</i>")
     return "\n".join(parts)
 
 
 def main() -> None:
-    bets_log = sys.argv[1] if len(sys.argv) > 1 else ""
-    print(compose(bets_log))
+    args = [a for a in sys.argv[1:]]
+    html = "--html" in args
+    bets = next((a for a in args if not a.startswith("--")), "")
+    print(compose(bets, html=html))
 
 
 if __name__ == "__main__":
