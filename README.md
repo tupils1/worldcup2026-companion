@@ -35,7 +35,7 @@ Every claim is anchored: market lean comes from de-vigged O/U lines across real 
 
 ## What it does / 它做什么
 
-Every evening (23:00 by default) a launchd job runs the full pipeline and pushes a Chinese-language digest:
+Every evening (20:00 by default) a launchd job runs the full pipeline and pushes a Chinese-language digest:
 
 - **Tactical 推演 (scout layer)** — LLM-generated team profiles + matchup briefs (formation clash, game script, key battles, swing factors), anchored to real data: Elo, recent form, *verified* current absences, venue weather. Player names are whitelist-constrained so the LLM can't invent people.
 - **Three-way total-goals check** — de-vigged market O/U line (the sharpest baseline) vs a Dixon-Coles model vs the tactical lean. Divergence (⚑) is a talking point, not an auto-edge — the digest says so.

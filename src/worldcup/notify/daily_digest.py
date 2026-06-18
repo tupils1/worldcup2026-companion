@@ -462,6 +462,11 @@ def compose(bets_log: str = "", html: bool = False) -> str:
         fresh = _freshness_lines(conn)
         review = review_block(conn)
         qualif = qualification_block(conn)
+        try:
+            from worldcup.strategy.form_scan import digest_lines as _fs
+            formscan = _fs(conn)
+        except Exception:
+            formscan = []
     finally:
         conn.close()
 
@@ -476,6 +481,8 @@ def compose(bets_log: str = "", html: bool = False) -> str:
     sections.append(("── 战术推演 (打法/剧本/变量;⚑分歧才有下注角度)──", tactics, "窗口内无 WC 比赛", True))
     if qualif:  # 小组赛开打后:条件化出线概率 + 出线动机
         sections.append(("── 出线形势 + 出线动机 (基于已踢结果模拟)──", qualif, "", True))
+    if formscan:  # 进球 vs xG 回归观察名单(软盘假设,非绿灯)
+        sections.append(("── 状态扫描 (进球vsxG;⚑虚高可fade / ⚑被低估可背,仍要过门禁)──", formscan, "", False))
     sections.append(("── 末轮出线利益 (默契平/生死对攻/走过场 → 总进球)──", md3, "待小组前两轮打完后激活", False))
     sections.append(("── 新闻 / 伤病 / 硬缺阵 ──", news, "近期无 严重度≥4 伤病/缺阵", False))
     sections.append(("── 内讧/士气(看球谈资,不下注)──", watch, "近 14 天无", False))

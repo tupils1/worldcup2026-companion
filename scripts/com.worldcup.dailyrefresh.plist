@@ -13,14 +13,14 @@
         <string>full</string>
     </array>
 
-    <!-- Fire daily at 23:00 local (Asia/Shanghai) — WC matches kick off in the
-         Beijing early-morning hours, so the digest lands just before watching.
+    <!-- Fire daily at 20:00 local (Asia/Shanghai) — WC matches kick off in the
+         Beijing early-morning hours, so the digest lands with lead time to place bets before the overnight (Beijing) matches.
          If the Mac is asleep, launchd runs it once on the next wake.
          Edit Hour/Minute to reschedule, then reload. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>23</integer>
+        <integer>20</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
