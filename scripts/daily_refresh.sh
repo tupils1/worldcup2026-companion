@@ -135,6 +135,9 @@ $PY -m worldcup.ingest.api_football_squad >> "$FULL_LOG" 2>&1 || log "⚠ step F
 log "[13b] 昨日对答案: grade finished 推演 vs reality → tactics_review"
 $PY -m worldcup.eval.tactics_review >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 
+log "[13b'] 回归信号对答案: grade xG over/under-performance flags → form_review"
+$PY -m worldcup.eval.form_review >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
+
 log "[13c] Scout tactical briefs for upcoming WC fixtures (DeepSeek; market OU + injuries-grounded → daily_tactics)"
 $PY -m worldcup.strategy.scout --daily --days 3 >> "$FULL_LOG" 2>&1 || log "⚠ step FAILED (continuing) — see lines above in $FULL_LOG"
 

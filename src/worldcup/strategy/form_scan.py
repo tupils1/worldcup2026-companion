@@ -79,11 +79,19 @@ def scan(conn) -> list[dict]:
 
 
 def digest_lines(conn, top: int = 8) -> list[str]:
-    """Compact regression watchlist for the digest — only the teams xG flags hardest."""
+    """Compact regression watchlist for the digest — only the teams xG flags hardest.
+    Leads with the signal's own track record (once round 2 lets it be graded)."""
     rows = [f for f in scan(conn) if f["label"].startswith("⚑")][:top]
     if not rows:
         return []
     out = []
+    try:
+        from worldcup.eval.form_review import digest_line as _track
+        track = _track(conn)
+        if track:
+            out.append(track)  # e.g. "回归信号命中: 7/10 (虚高 4/5 · 被低估 3/5)"
+    except Exception:
+        pass
     for f in rows:
         z = CODE_ZH.get(f["code"], f["code"])
         out.append(f"{z}: 进{f['gf']:.0f}/xG{f['xgf']:.1f} 失{f['ga']:.0f}/被xG{f['xga']:.1f}"

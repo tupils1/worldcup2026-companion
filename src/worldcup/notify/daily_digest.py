@@ -277,12 +277,12 @@ def tactics_block(conn, limit: int = 4) -> list[str]:
 
 
 # ── digest section toggles ───────────────────────────────────────────────────
-# User (2026-06-01) chose ENJOYMENT-FIRST ("B"): the WC is once every 4 years, not an
-# EV grind ("if I wanted to squeeze EV I'd go to the stock market"). So cross-book
-# arbitrage is dropped from the push and the digest leads with the football read.
-# Flip these to re-enable.
-INCLUDE_ARBITRAGE = False
-INCLUDE_POLYMARKET = False  # dropped 2026-06-04 (user: enjoyment-first, no EV-grind either)
+# Round 1 was enjoyment-first (sections off). 2026-06-18 the user starts betting in
+# round 2 and re-enabled best-price/cross-book + Polymarket (NOT value_bets — the
+# main-line model edge is backtest-refuted). Best-price = free EV on bets you'll make
+# anyway; Polymarket only flags real divergence from de-vigged Betfair.
+INCLUDE_ARBITRAGE = True   # 跨书套利 & 最优赔率(比价拿最好价 → 直接抬 CLV)
+INCLUDE_POLYMARKET = True  # Polymarket vs 去水 Betfair 锐价的相对偏离
 
 
 def md3_lines(conn, limit: int = 8) -> list[str]:
