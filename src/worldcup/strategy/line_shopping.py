@@ -51,6 +51,9 @@ def load_latest_match_odds(conn) -> list[dict]:
              AND o.market=latest.market AND o.selection=latest.selection
              AND COALESCE(o.line,-999.0)=latest.lk AND o.captured_at=latest.mc
         WHERE o.market_scope='match'
+          AND o.match_id IN (
+              SELECT id FROM matches
+              WHERE finished=0 AND match_date >= date('now','-1 day'))
     """)
     return [dict(r) for r in rows]
 

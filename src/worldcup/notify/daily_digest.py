@@ -490,7 +490,8 @@ def compose(bets_log: str = "", html: bool = False) -> str:
     if INCLUDE_POLYMARKET:
         sections.append(("── Polymarket 价差(NO=偏贵该卖 / YES=偏便宜该买;真值=Betfair)──", poly_block(log), "无价差", False))
     if INCLUDE_ARBITRAGE:
-        sections.append(("── 跨书套利 & 最优赔率 ──", arb_block(log), "今日无套利 / 最优线", False))
+        sections.append(("── 最优赔率/比价 (⚠>3%「套利」多半是停更死盘抓不到;只作比价拿最好价)──",
+                         arb_block(log), "今日无套利 / 最优线", False))
     footer = "娱乐为主:小注 · 单注优先(串关 EV 最差)· 每注记 CLV · 亏完即止不补仓。"
 
     if not html:
