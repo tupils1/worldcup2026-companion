@@ -152,6 +152,11 @@ MATCHUP_SYS = """你是足球战术分析师。给你两支队的风格档案 + 
 6b. **结合场地/天气(若给出)**:露天**高温/高湿**抑制**高位逼抢/高节奏**那一方(体能掉得快→节奏↓→易被拖入低分);**带顶恒温场=无天气影响,别提天气**。体现在 clash 与总进球(露天酷热通常偏小球)。
 7. 对**软盘 prop** 的影响(目的,**不预测胜负**):总进球/角球/牌 各给倾向 + 战术理由。
 
+8. **若给出「用户现场观察」**:这是资深球迷的一手肉眼判断,补足模型看不到的东西(过程好坏、
+   是否过度依赖某核心、把握机会能力)。要**纳入推演并在相关处点出**(如"用户观察其把握机会差→
+   即便创造机会多,进球转化存疑,总进球别高估"),但**不盲信**——它是主观假设,与近期状态/缺阵冲突时
+   以客观数据为准,并可在 swing_factor 注明"若用户观察成立则…"。
+
 铁律:战术判断,服务 prop 角度 + 伤病评估,不预测胜负。把握低就给低 confidence。中文简洁。
 队名以输入首行给出的「代码=中文名」为准,全文只许出现这两支球队的名字,别写成其他国家队。
 style 分数含义(1-5):tempo 高=快节奏;width 高=多走边路传中;press 高=高位逼抢;directness 高=长传冲吊;
@@ -409,12 +414,15 @@ def generate_matchup(conn, home, away, ph, pa, key, model, force=False) -> dict 
     abs_h, abs_a = _team_absences(conn, home), _team_absences(conn, away)
     form_h, form_a = _team_form(conn, home), _team_form(conn, away)
     wx = _fixture_weather(conn, home, away)
-    # Cache key covers EVERYTHING the prompt sees: absences + recent form + weather.
-    # The old absences-only signature kept serving pre-tournament briefs all tournament
-    # long — form changes after every round and forecasts update daily. Old plaintext
-    # signatures never match the new hash, so each fixture re-generates exactly once.
+    from worldcup.strategy.scout_note import team_notes, notes_signature
+    notes_h, notes_a = team_notes(conn, home), team_notes(conn, away)
+    # Cache key covers EVERYTHING the prompt sees: absences + recent form + weather +
+    # the user's manual observations. The old absences-only signature kept serving
+    # pre-tournament briefs all tournament long; old plaintext signatures never match
+    # the new hash, so each fixture re-generates exactly once when any input changes.
     sig = hashlib.md5(("|".join(sorted(abs_h)) + "##" + "|".join(sorted(abs_a))
-                       + "##" + form_h + "##" + form_a + "##" + wx).encode()).hexdigest()
+                       + "##" + form_h + "##" + form_a + "##" + wx
+                       + "##" + notes_signature(conn, home, away)).encode()).hexdigest()
     if not force:
         cur = conn.execute("SELECT payload, absences_sig FROM match_tactics WHERE home=? AND away=?",
                            (home, away)).fetchone()
@@ -422,17 +430,19 @@ def generate_matchup(conn, home, away, ph, pa, key, model, force=False) -> dict 
             return json.loads(cur["payload"])
     roster_h, roster_a = _roster_whitelist(conn, home, ph), _roster_whitelist(conn, away, pa)
 
-    def blk(code, prof, ab, fm, roster):
+    def blk(code, prof, ab, fm, roster, notes):
         d = _compact(prof)
         d["当前缺阵"] = ab or "无已知"
         d["近期状态"] = fm or "无数据"
         d["锚定球员(对位人名只能逐字从中选)"] = roster or "无 → 对位只写位置"
+        if notes:
+            d["用户现场观察(资深球迷主观,需对照核实)"] = notes
         return f"{code}: {json.dumps(d, ensure_ascii=False)}"
 
     head = (f"本场对阵: 主队 {home}={CODE_ZH.get(home, home)} vs 客队 {away}={CODE_ZH.get(away, away)}"
             "(队名以此为准,勿写成任何其他国家队)")
-    user = (head + "\n主队 " + blk(home, ph, abs_h, form_h, roster_h)
-            + "\n客队 " + blk(away, pa, abs_a, form_a, roster_a)
+    user = (head + "\n主队 " + blk(home, ph, abs_h, form_h, roster_h, notes_h)
+            + "\n客队 " + blk(away, pa, abs_a, form_a, roster_a, notes_a)
             + (f"\n场地/天气: {wx}" if wx else ""))
     payload = {"model": model, "temperature": 0.3, "max_tokens": 900,
                "response_format": {"type": "json_object"},
