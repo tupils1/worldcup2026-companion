@@ -294,12 +294,9 @@ def monte_carlo(
     if missing:
         raise ValueError(f"Missing fit params for teams: {missing}")
 
-    sampler = MatchSampler(
-        rho=params.rho,
-        home_adv=params.home_advantage,
-        attack=params.attack,
-        defense=params.defense,
-    )
+    # Calibrated λ (lam_scale/floor), same as predict_lambda — keeps projected
+    # goal totals consistent with the per-match model instead of running ~4% low (B6).
+    sampler = sampler_from_params(params, calibrated=True)
 
     # Pre-warm cache for all group-stage pairings (the only deterministic part)
     for letter, teams in groups.items():

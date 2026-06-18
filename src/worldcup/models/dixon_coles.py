@@ -158,6 +158,32 @@ def _load_matches(
     return [dict(r) for r in rows]
 
 
+def _dedup_twins(rows: list[dict]) -> list[dict]:
+    """Drop duplicate rows for the SAME fixture double-entered by two feeds (martj42
+    vs api_football) — identified by same unordered team pair, identical score, and
+    kickoff within 2 days. Two genuinely distinct meetings of the same teams are weeks
+    apart (and rarely the exact same score), so this can't merge real fixtures. Without
+    it the fit double-weights those games; with the WC's near-full time-decay weight,
+    a handful of duplicated blow-outs visibly inflate the recent goal environment.
+    (Belt-and-suspenders: scripts/dedup_twins.py cleans the DB itself; this guards the
+    fit even before that's run.)"""
+    seen: list[tuple[frozenset, int, int, dt.date]] = []
+    out: list[dict] = []
+    for r in rows:
+        try:
+            d = dt.date.fromisoformat(r["match_date"][:10])
+        except (ValueError, TypeError):
+            out.append(r); continue
+        pair = frozenset((r["home_code"], r["away_code"]))
+        gtot, gdiff = r["home_score"] + r["away_score"], abs(r["home_score"] - r["away_score"])
+        if any(p == pair and gt == gtot and gd == gdiff and abs((d - sd).days) <= 2
+               for p, gt, gd, sd in seen):
+            continue
+        seen.append((pair, gtot, gdiff, d))
+        out.append(r)
+    return out
+
+
 def _load_elo(db_path: Path | str) -> dict[str, float]:
     """team_code → current Elo (eloratings.net)."""
     conn = get_conn(db_path)
@@ -255,6 +281,7 @@ def fit(
     `elo_scale`: conversion from Elo points to log-rate units.
     """
     rows = _load_matches(db_path=db_path, since=since, until=until)
+    rows = _dedup_twins(rows)
 
     if teams_filter is not None:
         ts = set(teams_filter)
