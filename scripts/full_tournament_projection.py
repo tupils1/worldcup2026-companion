@@ -35,7 +35,10 @@ from worldcup.simulator.monte_carlo import (
     GROUP_PAIRINGS,
     HOSTS,
     MatchSampler,
-    _make_r32_bracket,
+    QF_FEEDERS,
+    R16_FEEDERS,
+    SF_FEEDERS,
+    _resolve_r32,
     _simulate_group,
     _simulate_knockout,
 )
@@ -46,33 +49,37 @@ ROOT = Path(__file__).resolve().parents[1]
 def simulate_detailed(sampler, groups, elo, rng) -> dict:
     """One full tournament. Returns full structured state."""
     group_rankings = {}   # letter -> [1st, 2nd, 3rd, 4th] codes
-    winners, runners_up, thirds = [], [], []
+    winner_by_g, runner_by_g, third_by_g = {}, {}, {}
+    third_standings = []
     for letter in sorted(groups):
         ranked = _simulate_group(groups[letter], elo, sampler, rng)
         group_rankings[letter] = [r.team for r in ranked]
-        winners.append(ranked[0].team)
-        runners_up.append(ranked[1].team)
-        thirds.append(ranked[2])
+        winner_by_g[letter] = ranked[0].team
+        runner_by_g[letter] = ranked[1].team
+        third_by_g[letter] = ranked[2].team
+        third_standings.append((ranked[2], letter))
 
-    best_thirds_objs = sorted(
-        thirds, key=lambda r: (-r.points, -r.gd, -r.gf, -elo.get(r.team, 1500.0))
-    )[:8]
-    best_thirds = [r.team for r in best_thirds_objs]
+    best = sorted(third_standings,
+                  key=lambda x: (-x[0].points, -x[0].gd, -x[0].gf, -elo.get(x[0].team, 1500.0))
+                  )[:8]
+    qual_groups = {g for _, g in best}
+    best_thirds = [third_by_g[g] for g in qual_groups]
 
-    bracket = _make_r32_bracket(winners, runners_up, best_thirds)
-    r16 = [_simulate_knockout(h, a, sampler, rng) for h, a in bracket]
-    qf = [_simulate_knockout(r16[i], r16[i + 1], sampler, rng) for i in range(0, 16, 2)]
-    sf = [_simulate_knockout(qf[i], qf[i + 1], sampler, rng) for i in range(0, 8, 2)]
-    finalists = [_simulate_knockout(sf[i], sf[i + 1], sampler, rng) for i in range(0, 4, 2)]
-    champion = _simulate_knockout(finalists[0], finalists[1], sampler, rng)
+    # Official 2026 bracket tree (feeders), not the old 1-vs-32 snake seed.
+    r32_pairs = _resolve_r32(winner_by_g, runner_by_g, third_by_g, qual_groups)
+    r32_win = [_simulate_knockout(h, a, sampler, rng) for h, a in r32_pairs]
+    r16 = [_simulate_knockout(r32_win[i], r32_win[j], sampler, rng) for i, j in R16_FEEDERS]
+    qf = [_simulate_knockout(r16[i], r16[j], sampler, rng) for i, j in QF_FEEDERS]
+    sf = [_simulate_knockout(qf[i], qf[j], sampler, rng) for i, j in SF_FEEDERS]
+    champion = _simulate_knockout(sf[0], sf[1], sampler, rng)
 
     return {
         "group_rankings": group_rankings,
-        "winners": winners,
-        "runners_up": runners_up,
+        "winners": list(winner_by_g.values()),
+        "runners_up": list(runner_by_g.values()),
         "best_thirds": best_thirds,
         "r16": r16, "qf": qf, "sf": sf,
-        "finalists": finalists,
+        "finalists": sf,
         "champion": champion,
     }
 

@@ -90,10 +90,16 @@ def ingest_historical_matches(
             if home == "MISS" or away == "MISS":
                 continue
             finished = 1 if (r["home_score"] is not None and r["away_score"] is not None) else 0
+            # Unify the 2026 WC label with api_football's ('FIFA World Cup 2026') so the
+            # two feeds stop diverging (martj42 writes the bare 'FIFA World Cup' for every
+            # edition). Keeps exact-match competition queries from silently missing rows.
+            comp = r["tournament"]
+            if comp == "FIFA World Cup" and (r["date"] or "") >= "2026-01-01":
+                comp = "FIFA World Cup 2026"
             rows.append(
                 (
                     home, away, r["date"],
-                    r["tournament"],
+                    comp,
                     r["city"],
                     1 if r["neutral"] else 0,
                     r["home_score"], r["away_score"],

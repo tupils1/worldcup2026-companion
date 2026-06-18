@@ -106,6 +106,14 @@ def main() -> None:
     conn.execute(f"DELETE FROM matches WHERE id IN ({','.join('?' * len(drop_ids))})", drop_ids)
     conn.commit()
     print(f"deleted {len(drop_ids)} row(s).")
+
+    # B21: unify the split 2026-WC competition label ('FIFA World Cup' from martj42
+    # vs 'FIFA World Cup 2026' from api_football) so exact-match queries are reliable.
+    n_lbl = conn.execute(
+        "UPDATE matches SET competition='FIFA World Cup 2026' "
+        "WHERE competition='FIFA World Cup' AND match_date>=?", (WC_LO,)).rowcount
+    conn.commit()
+    print(f"normalized {n_lbl} competition label(s) → 'FIFA World Cup 2026'.")
     remaining = conn.execute(
         """SELECT COUNT(*) FROM (
              SELECT 1 FROM matches WHERE match_date BETWEEN ? AND ?

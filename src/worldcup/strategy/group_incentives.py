@@ -19,6 +19,7 @@ from worldcup.db.schema import DEFAULT_DB_PATH, get_conn
 # 第3名出线点数(跨组近似):48队制 8/12 第3名晋级 → 门槛低。≥4 多半安全,3 边缘,≤2 基本出局。
 THIRD_SAFE = 4
 THIRD_ALIVE = 3
+DEAD_GD = -4  # 0分且净胜球已极差 → 即便末轮全胜到3分也基本排不进最佳8个第3
 
 # 一个比赛结果对(主,客)的 (积分, 净胜球, 进球) 增量(净胜/进球用作抢断同分的近似)
 DELTA = {
@@ -60,7 +61,8 @@ def _final_rank(base: dict, results: list[tuple]) -> list[str]:
 
 
 def _team_state(base, fh, fa, oh, oa, team) -> str:
-    """secured / draw_ok / must_win / dead / live, by enumerating the 9 MD3 outcome combos."""
+    """secured / third_safe / draw_ok / must_win / dead / live, by enumerating the 9
+    MD3 outcome combos for top-2, then third-place math for teams that can't make top-2."""
     by_res = {"win": [], "draw": [], "loss": []}
     for fo in "HDA":
         tr = ("win" if (fo == "H" and team == fh) or (fo == "A" and team == fa)
@@ -72,9 +74,14 @@ def _team_state(base, fh, fa, oh, oa, team) -> str:
     allres = by_res["win"] + by_res["draw"] + by_res["loss"]
     if all(allres):
         return "secured"            # 进前2 无论如何
-    if not any(allres):             # 任何情况都进不了前2 → 看第3名
-        proj = base[team]["pts"] + 3   # 全力赢能到的点数
-        return "must_win" if proj >= THIRD_ALIVE else "dead"
+    if not any(allres):             # 任何情况都进不了前2 → 走第3名出线逻辑
+        pts, gd = base[team]["pts"], base[team]["gd"]
+        # 旧版 proj=pts+3>=3 恒真 → dead 永不可达,把已4分稳出线的队误判 must_win。
+        if pts >= THIRD_SAFE:
+            return "third_safe"     # 已≥4分,基本锁定最佳第3 → 末轮无压力(走过场)
+        if pts == 0 and gd <= DEAD_GD:
+            return "dead"           # 0分且净胜球极差,末轮全胜也基本排不进8个最佳第3
+        return "must_win"           # 需要赢(或拿分)才有第3名出线的实际可能
     if all(by_res["draw"]):
         return "draw_ok"            # 平局通常足够进前2
     if all(by_res["win"]) and sum(by_res["draw"]) <= 1:
@@ -82,23 +89,29 @@ def _team_state(base, fh, fa, oh, oa, team) -> str:
     return "live"
 
 
-# (stateA, stateB)-set → (标签, 总进球倾向, 说明). 顺序敏感的用 frozenset 对称匹配。
+# (stateA, stateB) → (标签, 总进球倾向, 说明). third_safe(已稳进最佳第3)在下注语义上
+# 等同 secured(无压力),归一到 SAFE 一并处理。
+SAFE = {"secured", "third_safe"}
+
+
 def _fixture_call(sa: str, sb: str) -> tuple[str, str, str]:
-    pair = frozenset((sa, sb))
-    if sa == sb == "secured":
-        return ("走过场", "under", "双方已锁前2 → 强度低、轮换,偏小球")
-    if pair == frozenset(("dead",)) or (sa == "dead" and sb == "dead"):
+    pair = {sa, sb}
+    if sa in SAFE and sb in SAFE:
+        return ("走过场", "under", "双方已出线(锁前2或稳最佳第3)→ 强度低、轮换,偏小球")
+    if sa == sb == "dead":
         return ("死亡过场", "under", "双方已出局 → 轮换、低强度,偏小球")
     if sa == sb == "draw_ok":
         return ("默契平", "under", "一平皆大欢喜 → 可能默契/保守,偏小球")
     if sa == sb == "must_win":
         return ("生死对攻", "over", "双方必须赢 → 开放对攻,偏大球")
-    if "secured" in pair and "must_win" in pair:
+    if pair & SAFE and "must_win" in pair:
         return ("一安一拼", "neutral", "一方已出线(可能轮换)、一方拼命 → 方向不定,偏看需求方")
     if "dead" in pair and "must_win" in pair:
         return ("一死一拼", "neutral", "一方出局(轮换)、一方拼命 → 需求方进攻 vs 对方放养")
-    if "draw_ok" in pair and "secured" in pair:
+    if "draw_ok" in pair and pair & SAFE:
         return ("低压", "under", "双方都安全(锁定/平即可)→ 强度低,偏小球")
+    if "dead" in pair and pair & SAFE:
+        return ("一安一死", "under", "一方已出线、一方出局 → 都无压力,偏小球")
     return ("常规", "neutral", "双方有正常竞争 → 中性")
 
 

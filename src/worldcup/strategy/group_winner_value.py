@@ -41,9 +41,7 @@ from worldcup.db.schema import DEFAULT_DB_PATH
 from worldcup.models.dixon_coles import fit
 from worldcup.simulator.monte_carlo import (
     MatchSampler,
-    _make_r32_bracket,
     _simulate_group,
-    _simulate_knockout,
 )
 from worldcup.strategy.value_bets import devig_shin, kelly_fraction
 

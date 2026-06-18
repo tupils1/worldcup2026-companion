@@ -180,17 +180,85 @@ def _simulate_knockout(
     return home if rng.random() < 0.5 else away  # penalties (coin flip)
 
 
-def _make_r32_bracket(
-    winners: list[str], runners_up: list[str], best_thirds: list[str]
-) -> list[tuple[str, str]]:
-    """32 teams → 16 R32 pairs.
+# ── Official 2026 FIFA World Cup knockout bracket ────────────────────────────
+# Source: FIFA match schedule / Wikipedia "2026 FIFA World Cup knockout stage".
+# R32 slots in match order (M73..M88). A slot is ('W',g) group winner, ('R',g)
+# runner-up, or ('T', {groups}) a best-third drawn from one of those groups.
+# This replaces the old 1-vs-32 snake seed, which matched neither the real W/RU
+# pairings nor the group-constrained third-place slots (audit B8).
+_W, _R, _T = "W", "R", "T"
+R32_SLOTS: list[tuple] = [
+    ((_R, "A"), (_R, "B")),                  # 0  M73
+    ((_W, "E"), (_T, frozenset("ABCDF"))),   # 1  M74
+    ((_W, "F"), (_R, "C")),                  # 2  M75
+    ((_W, "C"), (_R, "F")),                  # 3  M76
+    ((_W, "I"), (_T, frozenset("CDFGH"))),   # 4  M77
+    ((_R, "E"), (_R, "I")),                  # 5  M78
+    ((_W, "A"), (_T, frozenset("CEFHI"))),   # 6  M79
+    ((_W, "L"), (_T, frozenset("EHIJK"))),   # 7  M80
+    ((_W, "D"), (_T, frozenset("BEFIJ"))),   # 8  M81
+    ((_W, "G"), (_T, frozenset("AEHIJ"))),   # 9  M82
+    ((_R, "K"), (_R, "L")),                  # 10 M83
+    ((_W, "H"), (_R, "J")),                  # 11 M84
+    ((_W, "B"), (_T, frozenset("EFGIJ"))),   # 12 M85
+    ((_W, "J"), (_R, "H")),                  # 13 M86
+    ((_W, "K"), (_T, frozenset("DEIJL"))),   # 14 M87
+    ((_R, "D"), (_R, "G")),                  # 15 M88
+]
+# R32 indices whose second slot is a best-third (+ that slot's allowed group set).
+THIRD_SLOTS: list[tuple[int, frozenset]] = [
+    (i, b[1]) for i, (a, b) in enumerate(R32_SLOTS) if b[0] == _T
+]
+# Bracket tree as feeder indices: which prior-round match winners meet.
+R16_FEEDERS = [(1, 4), (0, 2), (3, 5), (6, 7), (10, 11), (8, 9), (13, 15), (12, 14)]
+QF_FEEDERS = [(0, 1), (4, 5), (2, 3), (6, 7)]
+SF_FEEDERS = [(0, 1), (2, 3)]
 
-    Seeds 1-12 = group winners (A→L order), 13-24 = runners-up (A→L order),
-    25-32 = best 3rd-placers in ranked order. Pair seed i vs seed (33-i).
-    """
-    seeds = list(winners) + list(runners_up) + list(best_thirds)
-    assert len(seeds) == 32
-    return [(seeds[i], seeds[31 - i]) for i in range(16)]
+
+def _assign_thirds(qual_groups: set[str]) -> dict[int, str]:
+    """Assign the 8 qualifying third-place groups to the 8 third-place R32 slots,
+    each respecting its allowed group set (constraint-respecting bipartite matching).
+    FIFA's official 495-row table is one specific valid matching; this returns a
+    deterministic valid one (faithful to every structural constraint — a third only
+    ever meets a winner whose slot lists its group). Falls back to filling leftovers
+    if a (never-observed) infeasible set appears, so the sim can't crash."""
+    qg = sorted(qual_groups)
+    assign: dict[int, str] = {}
+
+    def bt(i: int, used: frozenset) -> bool:
+        if i == len(THIRD_SLOTS):
+            return True
+        idx, allowed = THIRD_SLOTS[i]
+        for g in qg:
+            if g in allowed and g not in used:
+                assign[idx] = g
+                if bt(i + 1, used | {g}):
+                    return True
+                del assign[idx]
+        return False
+
+    if not bt(0, frozenset()):
+        used = set(assign.values())
+        leftover = [g for g in qg if g not in used]
+        for (idx, _allowed), g in zip(
+                [s for s in THIRD_SLOTS if s[0] not in assign], leftover):
+            assign[idx] = g
+    return assign
+
+
+def _resolve_r32(winner_by_g, runner_by_g, third_by_g, qual_groups) -> list[tuple[str, str]]:
+    """Fill the 16 official R32 pairings from this sim's group results."""
+    assign = _assign_thirds(qual_groups)
+
+    def team(slot):
+        typ, g = slot
+        return winner_by_g[g] if typ == _W else runner_by_g[g]
+
+    pairs = []
+    for i, (a, b) in enumerate(R32_SLOTS):
+        tb = third_by_g[assign[i]] if b[0] == _T else team(b)
+        pairs.append((team(a), tb))
+    return pairs
 
 
 def simulate_one_tournament(
@@ -202,47 +270,49 @@ def simulate_one_tournament(
     """Run one full tournament. Returns {team: furthest_round_reached}."""
     progression: dict[str, str] = {}
 
-    winners: list[str] = []
-    runners_up: list[str] = []
-    thirds: list[GroupStanding] = []
+    winner_by_g: dict[str, str] = {}
+    runner_by_g: dict[str, str] = {}
+    third_by_g: dict[str, str] = {}
+    third_standings: list[tuple[GroupStanding, str]] = []
 
     for letter in sorted(groups):
         ranked = _simulate_group(groups[letter], elo, sampler, rng)
         for r in ranked:
             progression[r.team] = ROUND_GROUP
-        winners.append(ranked[0].team)
-        runners_up.append(ranked[1].team)
-        thirds.append(ranked[2])
+        winner_by_g[letter] = ranked[0].team
+        runner_by_g[letter] = ranked[1].team
+        third_by_g[letter] = ranked[2].team
+        third_standings.append((ranked[2], letter))
 
-    # Best 8 third-placers
-    best_thirds_objs = sorted(
-        thirds, key=lambda r: (-r.points, -r.gd, -r.gf, -elo.get(r.team, 1500.0))
-    )[:8]
-    best_thirds = [r.team for r in best_thirds_objs]
+    # Best 8 third-placers → the groups that supply a third to the knockout.
+    best = sorted(third_standings,
+                  key=lambda x: (-x[0].points, -x[0].gd, -x[0].gf, -elo.get(x[0].team, 1500.0))
+                  )[:8]
+    qual_groups = {g for _, g in best}
 
-    r32_teams = winners + runners_up + best_thirds
-    for t in r32_teams:
+    for t in (list(winner_by_g.values()) + list(runner_by_g.values())
+              + [third_by_g[g] for g in qual_groups]):
         progression[t] = ROUND_R32
 
-    # Knockout
-    bracket = _make_r32_bracket(winners, runners_up, best_thirds)
-    r16 = [_simulate_knockout(h, a, sampler, rng) for h, a in bracket]
-    for t in r16:
+    # Knockout on the official bracket tree (feeders, not consecutive pairing).
+    r32_pairs = _resolve_r32(winner_by_g, runner_by_g, third_by_g, qual_groups)
+    r32_win = [_simulate_knockout(h, a, sampler, rng) for h, a in r32_pairs]
+    for t in r32_win:
         progression[t] = ROUND_R16
 
-    qf = [_simulate_knockout(r16[i], r16[i + 1], sampler, rng) for i in range(0, 16, 2)]
-    for t in qf:
+    r16_win = [_simulate_knockout(r32_win[i], r32_win[j], sampler, rng) for i, j in R16_FEEDERS]
+    for t in r16_win:
         progression[t] = ROUND_QF
 
-    sf = [_simulate_knockout(qf[i], qf[i + 1], sampler, rng) for i in range(0, 8, 2)]
-    for t in sf:
+    qf_win = [_simulate_knockout(r16_win[i], r16_win[j], sampler, rng) for i, j in QF_FEEDERS]
+    for t in qf_win:
         progression[t] = ROUND_SF
 
-    finalists = [_simulate_knockout(sf[i], sf[i + 1], sampler, rng) for i in range(0, 4, 2)]
-    for t in finalists:
+    sf_win = [_simulate_knockout(qf_win[i], qf_win[j], sampler, rng) for i, j in SF_FEEDERS]
+    for t in sf_win:
         progression[t] = ROUND_F
 
-    champion = _simulate_knockout(finalists[0], finalists[1], sampler, rng)
+    champion = _simulate_knockout(sf_win[0], sf_win[1], sampler, rng)
     progression[champion] = ROUND_WIN
 
     return progression
