@@ -61,12 +61,19 @@ GROUP_PAIRINGS = ((0, 1), (2, 3), (0, 2), (1, 3), (0, 3), (1, 2))
 
 @dataclass
 class MatchSampler:
-    """Cached flat score-matrix distributions for fast sampling."""
+    """Cached flat score-matrix distributions for fast sampling.
+
+    Applies the SAME goal-rate calibration as DCParams.predict_lambda (lam_scale
+    then lam_floor) so the simulator and the digest's per-match model agree — the
+    two used to diverge (uncalibrated raw λ here vs calibrated there), which biased
+    every projected scoreline low (audit B6)."""
 
     rho: float
     home_adv: float
     attack: dict[str, float]
     defense: dict[str, float]
+    lam_floor: float = 0.0
+    lam_scale: float = 1.0
     _cache: dict[tuple[str, str, bool], np.ndarray] = field(default_factory=dict)
 
     def _flat(self, home: str, away: str, neutral: bool) -> np.ndarray:
@@ -77,12 +84,9 @@ class MatchSampler:
         ha = 0.0 if neutral else self.home_adv
         log_lh = self.attack[home] - self.defense[away] + ha
         log_la = self.attack[away] - self.defense[home]
-        M = score_matrix(
-            float(np.exp(log_lh)),
-            float(np.exp(log_la)),
-            rho=self.rho,
-            max_goals=MAX_GOALS,
-        )
+        lh = max(float(np.exp(log_lh)) * self.lam_scale, self.lam_floor)
+        la = max(float(np.exp(log_la)) * self.lam_scale, self.lam_floor)
+        M = score_matrix(lh, la, rho=self.rho, max_goals=MAX_GOALS)
         flat = M.flatten()
         flat = flat / flat.sum()  # belt-and-suspenders renorm against fp drift
         self._cache[key] = flat
@@ -114,6 +118,18 @@ class GroupStanding:
     @property
     def gd(self) -> int:
         return self.gf - self.ga
+
+
+def sampler_from_params(params, calibrated: bool = True) -> "MatchSampler":
+    """Build a MatchSampler from fitted DCParams. calibrated=True applies the same
+    lam_scale/lam_floor as predict_lambda (use for honest goal totals); False keeps
+    the legacy raw-λ behavior for call sites not yet migrated off it."""
+    return MatchSampler(
+        rho=params.rho, home_adv=params.home_advantage,
+        attack=params.attack, defense=params.defense,
+        lam_floor=params.lam_floor if calibrated else 0.0,
+        lam_scale=params.lam_scale if calibrated else 1.0,
+    )
 
 
 def _simulate_group(

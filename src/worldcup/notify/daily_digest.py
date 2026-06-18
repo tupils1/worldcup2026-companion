@@ -422,6 +422,35 @@ def _html_card_section(title: str, lines: list[str]) -> list[str]:
     return out
 
 
+def qualification_block(conn, n_sims: int = 20000) -> list[str]:
+    """出线形势 + 出线动机 — conditional MC projection per group (once group games
+    start). Each group is one card: standings + P(advance) + incentive label.
+    Returns [] before any group game is played or if the model can't fit."""
+    try:
+        from worldcup.strategy.qualification import board, zh
+    except Exception:
+        return []
+    try:
+        played = conn.execute("""SELECT COUNT(*) FROM matches WHERE finished=1
+            AND match_date>='2026-06-11' AND stage LIKE 'Group Stage%'""").fetchone()[0]
+        if not played:
+            return []
+        b = board(conn, n_sims=n_sims)
+    except Exception:
+        return []
+    out: list[str] = []
+    for g, gd in b["groups"].items():
+        if all(r["played"] == 0 for r in gd["rows"]):
+            continue  # this group hasn't kicked off — skip
+        tag = "已收官" if gd["all_played"] else f"剩{len(gd['remaining'])}场"
+        out.append(f"▌{g}组 ({tag})")
+        for r in gd["rows"]:
+            out.append(f"  {zh(r['team'])} {r['pts']}分 净{r['gd']:+d} · 出线{r['p_adv']*100:.0f}%"
+                       f"·夺头名{r['p_win']*100:.0f}% → {r['incentive']}({r['incentive_note']})")
+        out.append("")
+    return out
+
+
 def compose(bets_log: str = "", html: bool = False) -> str:
     log = ""
     if bets_log and Path(bets_log).exists():
@@ -432,6 +461,7 @@ def compose(bets_log: str = "", html: bool = False) -> str:
         md3 = md3_lines(conn)
         fresh = _freshness_lines(conn)
         review = review_block(conn)
+        qualif = qualification_block(conn)
     finally:
         conn.close()
 
@@ -444,6 +474,8 @@ def compose(bets_log: str = "", html: bool = False) -> str:
     if review:  # 只在有已完赛的 WC 比赛后出现
         sections.append(("── 昨日对答案 (推演 vs 实际;对了不吹,错了认账)──", review, "", False))
     sections.append(("── 战术推演 (打法/剧本/变量;⚑分歧才有下注角度)──", tactics, "窗口内无 WC 比赛", True))
+    if qualif:  # 小组赛开打后:条件化出线概率 + 出线动机
+        sections.append(("── 出线形势 + 出线动机 (基于已踢结果模拟)──", qualif, "", True))
     sections.append(("── 末轮出线利益 (默契平/生死对攻/走过场 → 总进球)──", md3, "待小组前两轮打完后激活", False))
     sections.append(("── 新闻 / 伤病 / 硬缺阵 ──", news, "近期无 严重度≥4 伤病/缺阵", False))
     sections.append(("── 内讧/士气(看球谈资,不下注)──", watch, "近 14 天无", False))
