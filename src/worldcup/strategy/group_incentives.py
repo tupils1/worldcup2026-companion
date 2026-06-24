@@ -20,6 +20,9 @@ from worldcup.db.schema import DEFAULT_DB_PATH, get_conn
 THIRD_SAFE = 4
 THIRD_ALIVE = 3
 DEAD_GD = -4  # 0分且净胜球已极差 → 即便末轮全胜到3分也基本排不进最佳8个第3
+# 'Group Stage - 3' 这个 stage 串历届世界杯都用(2022/2023的同名比赛也在库里),
+# 必须按本届日期收口,否则会把往届比赛当成本届末轮(曾导致跨组 KeyError 崩溃)。
+WC2026_FROM = "2026-06-01"
 
 # 一个比赛结果对(主,客)的 (积分, 净胜球, 进球) 增量(净胜/进球用作抢断同分的近似)
 DELTA = {
@@ -36,9 +39,9 @@ def group_standings(conn, group_letter: str) -> dict[str, dict]:
     tbl = {t: {"pts": 0, "gd": 0, "gf": 0, "played": 0} for t in teams}
     for m in conn.execute("""SELECT home_code h, away_code a, home_score hs, away_score as_
                              FROM matches WHERE finished=1 AND home_score IS NOT NULL
-                               AND stage LIKE 'Group Stage%'
+                               AND stage LIKE 'Group Stage%' AND match_date >= ?
                                AND home_code IN (SELECT code FROM teams WHERE group_letter=?)""",
-                          (group_letter,)):
+                          (WC2026_FROM, group_letter)):
         h, a, hs, as_ = m["h"], m["a"], m["hs"], m["as_"]
         if h not in tbl or a not in tbl:
             continue
@@ -120,21 +123,26 @@ def md3_board(conn) -> list[dict]:
     out = []
     md3 = conn.execute("""SELECT m.home_code h, m.away_code a, m.match_date d, t.group_letter g
         FROM matches m JOIN teams t ON t.code=m.home_code
-        WHERE m.finished=0 AND m.stage='Group Stage - 3' ORDER BY t.group_letter, m.match_date""").fetchall()
+        WHERE m.finished=0 AND m.stage='Group Stage - 3' AND m.match_date >= ?
+        ORDER BY t.group_letter, m.match_date""", (WC2026_FROM,)).fetchall()
     for r in md3:
         g = r["g"]
         st = group_standings(conn, g)
-        # 该组的两场末轮赛
+        # 该组的两场末轮赛 — 限本届 + 同组(防往届同名 stage 行混入,曾致跨组崩溃)
         gm = [(x["home_code"], x["away_code"]) for x in conn.execute(
-            """SELECT home_code, away_code FROM matches m JOIN teams t ON t.code=m.home_code
-               WHERE m.stage='Group Stage - 3' AND t.group_letter=?""", (g,))]
+            """SELECT m.home_code, m.away_code FROM matches m
+               JOIN teams th ON th.code=m.home_code
+               JOIN teams ta ON ta.code=m.away_code
+               WHERE m.stage='Group Stage - 3' AND m.match_date >= ?
+                 AND th.group_letter=? AND ta.group_letter=?""", (WC2026_FROM, g, g))]
         if len(st) != 4 or any(v["played"] < 2 for v in st.values()):
             out.append({"group": g, "home": r["h"], "away": r["a"], "date": r["d"],
                         "state": "待前两轮", "lean": "—", "note": "小组前两轮未打完,无法判定"})
             continue
         fh, fa = r["h"], r["a"]
-        other = [p for p in gm if set(p) != {fh, fa}]
-        if not other:
+        # defensive: only same-group fixtures whose four teams are all in the table
+        other = [p for p in gm if set(p) != {fh, fa} and p[0] in st and p[1] in st]
+        if not other or fh not in st or fa not in st:
             continue
         oh, oa = other[0]
         sa = _team_state(st, fh, fa, oh, oa, fh)
