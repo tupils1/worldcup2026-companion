@@ -285,7 +285,7 @@ INCLUDE_ARBITRAGE = True   # 跨书套利 & 最优赔率(比价拿最好价 → 
 INCLUDE_POLYMARKET = True  # Polymarket vs 去水 Betfair 锐价的相对偏离
 
 
-def md3_lines(conn, limit: int = 8) -> list[str]:
+def md3_lines(conn, limit: int = 24) -> list[str]:
     """末轮出线利益(死亡之组)— 只显示已可判定的(组内前两轮打完);赛前为空。
     带上对阵图分析,细化"争头名"是头名还是第二的签更软。"""
     try:
