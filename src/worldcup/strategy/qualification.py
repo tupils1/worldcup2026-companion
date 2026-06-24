@@ -29,7 +29,8 @@ import numpy as np
 from worldcup.db.schema import DEFAULT_DB_PATH, get_conn
 from worldcup.models.dixon_coles import fit
 from worldcup.models.standings import rank_teams
-from worldcup.simulator.monte_carlo import HOSTS, GroupStanding, sampler_from_params
+from worldcup.simulator.monte_carlo import (
+    HOSTS, R32_SLOTS, GroupStanding, sampler_from_params)
 from worldcup.teams_zh import CODE_ZH
 
 THIRD_PLACE_SLOTS = 8  # 2026: best 8 of 12 third-placers advance
@@ -227,6 +228,63 @@ def zh(code: str) -> str:
     return CODE_ZH.get(code, code)
 
 
+# ── bracket-aware seeding: who would each finishing position likely meet in R32? ──
+def _opponent_slot(pos: str, group: str):
+    """The R32 slot a given group-position plays. pos in {'W','R'} (winner/runner-up)."""
+    target = (pos, group)
+    for a, b in R32_SLOTS:
+        if a == target:
+            return b
+        if b == target:
+            return a
+    return None
+
+
+def bracket_outlook(conn, proj: dict | None = None) -> dict:
+    """For each group: the likely R32 opponent (and its strength) for finishing 1st vs
+    2nd, so 'topping the group' has a concrete value — sometimes 2nd is the softer draw.
+    Opponent strength = the MODAL team in that slot (highest projected P of that place),
+    using Elo as the strength proxy; third-place slots average over their allowed groups."""
+    proj = proj or project(conn)
+    elo = {t: 1500.0 for g in proj["groups"] for t in [r["team"] for r in proj["groups"][g]["rows"]]}
+    try:
+        for r in conn.execute("SELECT team_code, value FROM team_ratings WHERE rating_type='elo'"):
+            elo[r["team_code"]] = float(r["value"])
+    except Exception:
+        pass
+    # modal team per (group, place)
+    modal: dict[str, dict[str, str]] = {}
+    for g, gd in proj["groups"].items():
+        rows = gd["rows"]
+        modal[g] = {
+            "1st": max(rows, key=lambda r: r["p_1st"])["team"],
+            "2nd": max(rows, key=lambda r: r["p_2nd"])["team"],
+            "3rd": max(rows, key=lambda r: r["p_3rd"])["team"],
+        }
+
+    def slot_team_elo(slot):
+        typ, val = slot
+        if typ == "W":
+            t = modal[val]["1st"]; return t, elo.get(t, 1500.0)
+        if typ == "R":
+            t = modal[val]["2nd"]; return t, elo.get(t, 1500.0)
+        # third-place slot: average strength over the allowed groups' modal thirds
+        cand = [modal[g]["3rd"] for g in val if g in modal]
+        avg = sum(elo.get(t, 1500.0) for t in cand) / len(cand) if cand else 1500.0
+        return ("3名(" + "".join(sorted(val)) + ")"), avg
+
+    out = {}
+    for g in proj["groups"]:
+        opp1 = slot_team_elo(_opponent_slot("W", g)) if _opponent_slot("W", g) else ("?", 1500.0)
+        opp2 = slot_team_elo(_opponent_slot("R", g)) if _opponent_slot("R", g) else ("?", 1500.0)
+        # lower opponent Elo = easier draw; positive = topping is the softer side
+        edge = opp2[1] - opp1[1]
+        verdict = ("头名更软" if edge > 40 else ("第二更软" if edge < -40 else "差不多"))
+        out[g] = {"as_1st": opp1, "as_2nd": opp2, "top_is_easier_by_elo": round(edge, 0),
+                  "verdict": verdict}
+    return out
+
+
 def _fmt_group(g: str, gd: dict) -> list[str]:
     out = [f"【{g}组】" + ("(小组赛已收官)" if gd["all_played"] else
                           f"(剩{len(gd['remaining'])}场)")]
@@ -242,19 +300,32 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--group", help="only this group (A-L)")
     ap.add_argument("--n-sims", type=int, default=20000)
+    ap.add_argument("--bracket", action="store_true",
+                    help="对阵图视角: 各组头名 vs 第二的预期 R32 对手,头名是否更软")
     args = ap.parse_args()
     conn = get_conn(DEFAULT_DB_PATH)
     try:
-        b = board(conn, n_sims=args.n_sims)
+        proj = project(conn, n_sims=args.n_sims)
+        for g, gd in proj["groups"].items():
+            for row in gd["rows"]:
+                lbl, note = incentive(row, gd["all_played"])
+                row["incentive"], row["incentive_note"] = lbl, note
+        bo = bracket_outlook(conn, proj) if args.bracket else None
     finally:
         conn.close()
     print("=" * 70)
-    print(f"出线形势 + 出线动机 (条件化蒙特卡洛, {b['n_sims']:,} 次, 基于已踢结果)")
+    print(f"出线形势 + 出线动机 (条件化蒙特卡洛, {proj['n_sims']:,} 次, 基于已踢结果)")
     print("=" * 70)
-    for g, gd in b["groups"].items():
+    for g, gd in proj["groups"].items():
         if args.group and g != args.group.upper():
             continue
         print("\n".join(_fmt_group(g, gd)))
+        if bo and g in bo:
+            o1, o2 = bo[g]["as_1st"], bo[g]["as_2nd"]
+            t1 = o1[0] if not str(o1[0]).startswith("3名") else o1[0]
+            print(f"  对阵图: 头名→碰 {zh(t1) if o1[0] in CODE_ZH else o1[0]}(Elo{o1[1]:.0f}) · "
+                  f"第二→碰 {zh(o2[0]) if o2[0] in CODE_ZH else o2[0]}(Elo{o2[1]:.0f}) "
+                  f"→ {bo[g]['verdict']}")
         print()
 
 
