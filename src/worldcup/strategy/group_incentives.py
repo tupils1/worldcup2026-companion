@@ -15,6 +15,7 @@ from __future__ import annotations
 import sqlite3
 
 from worldcup.db.schema import DEFAULT_DB_PATH, get_conn
+from worldcup.models.standings import rank_teams
 
 # 第3名出线点数(跨组近似):48队制 8/12 第3名晋级 → 门槛低。≥4 多半安全,3 边缘,≤2 基本出局。
 THIRD_SAFE = 4
@@ -23,13 +24,6 @@ DEAD_GD = -4  # 0分且净胜球已极差 → 即便末轮全胜到3分也基本
 # 'Group Stage - 3' 这个 stage 串历届世界杯都用(2022/2023的同名比赛也在库里),
 # 必须按本届日期收口,否则会把往届比赛当成本届末轮(曾导致跨组 KeyError 崩溃)。
 WC2026_FROM = "2026-06-01"
-
-# 一个比赛结果对(主,客)的 (积分, 净胜球, 进球) 增量(净胜/进球用作抢断同分的近似)
-DELTA = {
-    "H": ((3, 1, 1), (0, -1, 0)),   # 主胜
-    "D": ((1, 0, 0), (1, 0, 0)),    # 平
-    "A": ((0, -1, 0), (3, 1, 1)),   # 客胜
-}
 
 
 def group_standings(conn, group_letter: str) -> dict[str, dict]:
@@ -54,37 +48,59 @@ def group_standings(conn, group_letter: str) -> dict[str, dict]:
     return tbl
 
 
-def _final_rank(base: dict, results: list[tuple]) -> list[str]:
-    tbl = {c: dict(v) for c, v in base.items()}
-    for h, a, o in results:
-        hd, ad = DELTA[o]
-        for code, (dp, dg, df) in ((h, hd), (a, ad)):
-            tbl[code]["pts"] += dp; tbl[code]["gd"] += dg; tbl[code]["gf"] += df
-    return sorted(tbl, key=lambda c: (-tbl[c]["pts"], -tbl[c]["gd"], -tbl[c]["gf"]))
+def group_played(conn, group_letter: str) -> list[tuple]:
+    """This group's FINISHED 2026 matches as (home, away, hg, ag) — the real pairwise
+    results head-to-head tiebreaking needs."""
+    teams = {r["code"] for r in conn.execute(
+        "SELECT code FROM teams WHERE group_letter=? AND in_worldcup_2026=1", (group_letter,))}
+    out = []
+    for m in conn.execute("""SELECT home_code h, away_code a, home_score hs, away_score as_
+                             FROM matches WHERE finished=1 AND home_score IS NOT NULL
+                               AND stage LIKE 'Group Stage%' AND match_date >= ?""", (WC2026_FROM,)):
+        if m["h"] in teams and m["a"] in teams:
+            out.append((m["h"], m["a"], m["hs"], m["as_"]))
+    return out
 
 
-def _seeding_live(base, fh, fa, oh, oa, team) -> bool:
+# MD3 outcome → a representative scoreline (±1 goal), so head-to-head among teams that
+# end level can be evaluated consistently with the real played results.
+_MD3_SCORE = {"H": (1, 0), "D": (0, 0), "A": (0, 1)}
+
+
+def _final_rank(teams, played, md3_ops, elo=None) -> list[str]:
+    """Rank the group under FIFA 2026 (head-to-head first) given real played matches
+    plus the hypothetical MD3 results (as ±1 scorelines)."""
+    results = list(played)
+    for fh, fa, o in md3_ops:
+        hg, ag = _MD3_SCORE[o]
+        results.append((fh, fa, hg, ag))
+    return rank_teams(teams, results, elo or {})
+
+
+def _seeding_live(teams, played, fh, fa, oh, oa, team, elo=None) -> bool:
     """Does THIS match's result still change `team`'s final group position? Holding the
     other MD3 match fixed, if varying fh-fa's result moves team's rank, its seeding is
     live — two already-qualified teams playing each other for top spot (→ better R32
     draw) are NOT a walkover, even though both are 'secured' for top-2."""
     for oo in "HDA":
-        ranks = {_final_rank(base, [(fh, fa, fo), (oh, oa, oo)]).index(team) for fo in "HDA"}
+        ranks = {_final_rank(teams, played, [(fh, fa, fo), (oh, oa, oo)], elo).index(team)
+                 for fo in "HDA"}
         if len(ranks) > 1:
             return True
     return False
 
 
-def _team_state(base, fh, fa, oh, oa, team) -> str:
+def _team_state(base, teams, played, fh, fa, oh, oa, team, elo=None) -> str:
     """secured / third_safe / draw_ok / must_win / dead / live, by enumerating the 9
-    MD3 outcome combos for top-2, then third-place math for teams that can't make top-2."""
+    MD3 outcome combos for top-2, then third-place math for teams that can't make top-2.
+    Ranking inside the enumeration uses FIFA 2026 head-to-head (via _final_rank)."""
     by_res = {"win": [], "draw": [], "loss": []}
     for fo in "HDA":
         tr = ("win" if (fo == "H" and team == fh) or (fo == "A" and team == fa)
               else "loss" if (fo == "H" and team == fa) or (fo == "A" and team == fh)
               else "draw")
         for oo in "HDA":
-            top2 = team in _final_rank(base, [(fh, fa, fo), (oh, oa, oo)])[:2]
+            top2 = team in _final_rank(teams, played, [(fh, fa, fo), (oh, oa, oo)], elo)[:2]
             by_res[tr].append(top2)
     allres = by_res["win"] + by_res["draw"] + by_res["loss"]
     if all(allres):
@@ -130,9 +146,18 @@ def _fixture_call(sa: str, sb: str) -> tuple[str, str, str]:
     return ("常规", "neutral", "双方有正常竞争 → 中性")
 
 
+def _load_elo(conn) -> dict:
+    try:
+        return {r["team_code"]: float(r["value"]) for r in conn.execute(
+            "SELECT team_code, value FROM team_ratings WHERE rating_type='elo'")}
+    except Exception:
+        return {}
+
+
 def md3_board(conn) -> list[dict]:
     """每场末轮赛的利益状态 + 总进球倾向. 只在该组前两轮都打完后才判定。"""
     out = []
+    elo = _load_elo(conn)
     md3 = conn.execute("""SELECT m.home_code h, m.away_code a, m.match_date d, t.group_letter g
         FROM matches m JOIN teams t ON t.code=m.home_code
         WHERE m.finished=0 AND m.stage='Group Stage - 3' AND m.match_date >= ?
@@ -140,6 +165,8 @@ def md3_board(conn) -> list[dict]:
     for r in md3:
         g = r["g"]
         st = group_standings(conn, g)
+        teams = list(st)
+        played = group_played(conn, g)
         # 该组的两场末轮赛 — 限本届 + 同组(防往届同名 stage 行混入,曾致跨组崩溃)
         gm = [(x["home_code"], x["away_code"]) for x in conn.execute(
             """SELECT m.home_code, m.away_code FROM matches m
@@ -157,11 +184,12 @@ def md3_board(conn) -> list[dict]:
         if not other or fh not in st or fa not in st:
             continue
         oh, oa = other[0]
-        sa = _team_state(st, fh, fa, oh, oa, fh)
-        sb = _team_state(st, fh, fa, oh, oa, fa)
+        sa = _team_state(st, teams, played, fh, fa, oh, oa, fh, elo)
+        sb = _team_state(st, teams, played, fh, fa, oh, oa, fa, elo)
         # 两队都已锁前2,但若小组头名仍在这场之间未决(影响R32签位)→ 争头名,非走过场
         if sa == "secured" and sb == "secured" and (
-                _seeding_live(st, fh, fa, oh, oa, fh) or _seeding_live(st, fh, fa, oh, oa, fa)):
+                _seeding_live(teams, played, fh, fa, oh, oa, fh, elo)
+                or _seeding_live(teams, played, fh, fa, oh, oa, fa, elo)):
             label, lean, note = ("争头名", "neutral",
                 "双方已出线但仍争小组头名(头名→R32签位更优)→ 都有动力赢,非走过场")
         else:

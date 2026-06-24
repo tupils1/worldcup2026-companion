@@ -40,6 +40,7 @@ import yaml
 from worldcup.db.schema import DEFAULT_DB_PATH
 from worldcup.models.dixon_coles import fit
 from worldcup.models.markets import score_matrix
+from worldcup.models.standings import rank_teams
 
 HOSTS = frozenset({"USA", "CAN", "MEX"})
 MAX_GOALS = 10
@@ -138,14 +139,16 @@ def _simulate_group(
     sampler: MatchSampler,
     rng: np.random.Generator,
 ) -> list[GroupStanding]:
-    """Six round-robin matches, then rank teams."""
+    """Six round-robin matches, then rank teams by the FIFA 2026 tiebreakers."""
     standings = {t: GroupStanding(team=t) for t in teams}
+    results: list[tuple[str, str, int, int]] = []
     for i, j in GROUP_PAIRINGS:
         home, away = teams[i], teams[j]
         # Host country at home in own group games is non-neutral.
         # martj42 flags all WC games as neutral, but the host is effectively home.
         neutral = home not in HOSTS
         hg, ag = sampler.sample_match(home, away, neutral, rng)
+        results.append((home, away, hg, ag))
         standings[home].gf += hg
         standings[home].ga += ag
         standings[away].gf += ag
@@ -158,10 +161,8 @@ def _simulate_group(
             standings[home].points += 1
             standings[away].points += 1
 
-    return sorted(
-        standings.values(),
-        key=lambda r: (-r.points, -r.gd, -r.gf, -elo.get(r.team, 1500.0)),
-    )
+    # FIFA 2026: head-to-head FIRST, then overall GD/goals, then Elo (ranking proxy).
+    return [standings[t] for t in rank_teams(teams, results, elo)]
 
 
 def _simulate_knockout(

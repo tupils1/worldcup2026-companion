@@ -28,6 +28,7 @@ import numpy as np
 
 from worldcup.db.schema import DEFAULT_DB_PATH, get_conn
 from worldcup.models.dixon_coles import fit
+from worldcup.models.standings import rank_teams
 from worldcup.simulator.monte_carlo import HOSTS, GroupStanding, sampler_from_params
 from worldcup.teams_zh import CODE_ZH
 
@@ -43,6 +44,7 @@ class Seed:
     ga: dict[str, int]
     played: dict[str, int]
     remaining: list[tuple[str, str]]  # (home, away) not-yet-played, home non-neutral if host
+    played_matches: list[tuple]       # (home, away, hg, ag) — needed for head-to-head ranking
 
 
 def load_groups(conn: sqlite3.Connection) -> dict[str, list[str]]:
@@ -100,11 +102,13 @@ def build_seeds(conn) -> dict[str, Seed]:
         ga = {t: 0 for t in teams}
         pl = {t: 0 for t in teams}
         done: set[frozenset] = set()
+        played_matches: list[tuple] = []
         for key, r in played.items():
             if not key <= set(teams):
                 continue
             done.add(key)
             h, a, hs, as_ = r["h"], r["a"], r["hs"], r["as_"]
+            played_matches.append((h, a, hs, as_))
             gf[h] += hs; ga[h] += as_; gf[a] += as_; ga[a] += hs
             pl[h] += 1; pl[a] += 1
             if hs > as_:
@@ -114,12 +118,8 @@ def build_seeds(conn) -> dict[str, Seed]:
             else:
                 pts[h] += 1; pts[a] += 1
         remaining = _remaining_pairs(conn, teams, done)
-        seeds[g] = Seed(teams, pts, gf, ga, pl, remaining)
+        seeds[g] = Seed(teams, pts, gf, ga, pl, remaining, played_matches)
     return seeds
-
-
-def _rank(seed: Seed, pts, gf, ga, elo) -> list[str]:
-    return sorted(seed.teams, key=lambda t: (-pts[t], -(gf[t] - ga[t]), -gf[t], -elo.get(t, 1500.0)))
 
 
 def project(conn, n_sims: int = 20000, seed_rng: int = 12) -> dict:
@@ -147,9 +147,11 @@ def project(conn, n_sims: int = 20000, seed_rng: int = 12) -> dict:
         for g in groups_sorted:
             s = seeds[g]
             pts = dict(s.pts); gf = dict(s.gf); ga = dict(s.ga)
+            sim_results: list[tuple] = []
             for h, a in s.remaining:
                 neutral = h not in HOSTS
                 hg, ag = sampler.sample_match(h, a, neutral, rng)
+                sim_results.append((h, a, hg, ag))
                 gf[h] += hg; ga[h] += ag; gf[a] += ag; ga[a] += hg
                 if hg > ag:
                     pts[h] += 3
@@ -157,7 +159,9 @@ def project(conn, n_sims: int = 20000, seed_rng: int = 12) -> dict:
                     pts[a] += 3
                 else:
                     pts[h] += 1; pts[a] += 1
-            ranked = _rank(s, pts, gf, ga, elo)
+            # FIFA 2026: in-group order uses head-to-head first (rank_teams); the
+            # third-place key below is cross-group so stays points/GD/goals/Elo.
+            ranked = rank_teams(s.teams, s.played_matches + sim_results, elo)
             group_rank[g] = ranked
             for i, t in enumerate(ranked):
                 place[t][i] += 1
@@ -196,7 +200,11 @@ def incentive(row: dict, all_played: bool) -> tuple[str, str]:
         return ("已出线", "小组赛收官,已晋级") if p >= 0.999 else (
             ("已出局", "小组赛收官,已淘汰") if p <= 0.001 else ("待定", "等其他组末轮定最佳第三"))
     if p >= 0.985:
-        return "基本锁定", "出线概率极高,末轮多为练兵/保人"
+        # advancing is locked — but if the group winner is still contested, they're
+        # playing for seeding (→ better R32 draw), not resting (用户洞察).
+        if 0.05 <= row.get("p_win", 0.0) <= 0.95:
+            return "争头名", "出线已稳,但仍争小组头名(头名→R32签位更优)→ 有动力赢"
+        return "基本锁定", "出线与名次基本已定,末轮多为练兵/保人"
     if p <= 0.03:
         return "命悬一线", "出线概率渺茫,需大胜+多组结果配合"
     if p <= 0.15:
