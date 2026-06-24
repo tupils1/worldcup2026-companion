@@ -154,8 +154,28 @@ def _load_elo(conn) -> dict:
         return {}
 
 
-def md3_board(conn) -> list[dict]:
-    """每场末轮赛的利益状态 + 总进球倾向. 只在该组前两轮都打完后才判定。"""
+def _seeding_note(g: str, bracket: dict | None) -> tuple[str, str]:
+    """Refine the 争头名 read with the bracket draw: is topping actually the softer
+    side? (sometimes 2nd draws a weaker R32 opponent → not everyone wants 1st)."""
+    base = "双方已出线但仍争小组头名(头名→R32签位)"
+    if not bracket or g not in bracket:
+        return "neutral", base + " → 都有动力赢,非走过场"
+    bo = bracket[g]
+    from worldcup.teams_zh import CODE_ZH
+    def nm(x):
+        return CODE_ZH.get(x[0], x[0])
+    o1, o2 = bo["as_1st"], bo["as_2nd"]
+    tail = f"(头名碰{nm(o1)}/第二碰{nm(o2)})"
+    if bo["verdict"] == "第二更软":
+        return "neutral", (f"争头名但第二的签更软{tail} → 未必都拼头名,可能有人乐得第二,强度存疑")
+    if bo["verdict"] == "头名更软":
+        return "neutral", (f"争头名,头名签更软{tail} → 都有动力赢")
+    return "neutral", f"争头名,两档签差不多{tail} → 看双方取舍"
+
+
+def md3_board(conn, bracket: dict | None = None) -> list[dict]:
+    """每场末轮赛的利益状态 + 总进球倾向. 只在该组前两轮都打完后才判定。
+    `bracket`(可选): qualification.bracket_outlook 的结果,用于细化"争头名"的签位软硬。"""
     out = []
     elo = _load_elo(conn)
     md3 = conn.execute("""SELECT m.home_code h, m.away_code a, m.match_date d, t.group_letter g
@@ -186,12 +206,13 @@ def md3_board(conn) -> list[dict]:
         oh, oa = other[0]
         sa = _team_state(st, teams, played, fh, fa, oh, oa, fh, elo)
         sb = _team_state(st, teams, played, fh, fa, oh, oa, fa, elo)
-        # 两队都已锁前2,但若小组头名仍在这场之间未决(影响R32签位)→ 争头名,非走过场
+        # 两队都已锁前2,但若小组头名仍在这场之间未决(影响R32签位)→ 争头名,非走过场。
+        # 再用对阵图细化:头名/第二谁的签更软(有时第二更软,未必都想赢)。
         if sa == "secured" and sb == "secured" and (
                 _seeding_live(teams, played, fh, fa, oh, oa, fh, elo)
                 or _seeding_live(teams, played, fh, fa, oh, oa, fa, elo)):
-            label, lean, note = ("争头名", "neutral",
-                "双方已出线但仍争小组头名(头名→R32签位更优)→ 都有动力赢,非走过场")
+            lean, note = _seeding_note(g, bracket)
+            label = "争头名"
         else:
             label, lean, note = _fixture_call(sa, sb)
         out.append({"group": g, "home": fh, "away": fa, "date": r["d"],

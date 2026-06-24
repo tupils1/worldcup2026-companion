@@ -286,9 +286,16 @@ INCLUDE_POLYMARKET = True  # Polymarket vs 去水 Betfair 锐价的相对偏离
 
 
 def md3_lines(conn, limit: int = 8) -> list[str]:
-    """末轮出线利益(死亡之组)— 只显示已可判定的(组内前两轮打完);赛前为空。"""
+    """末轮出线利益(死亡之组)— 只显示已可判定的(组内前两轮打完);赛前为空。
+    带上对阵图分析,细化"争头名"是头名还是第二的签更软。"""
     try:
-        board = md3_board(conn)
+        bracket = None
+        try:  # bracket outlook needs the MC projection — best-effort, don't block md3
+            from worldcup.strategy.qualification import bracket_outlook
+            bracket = bracket_outlook(conn)
+        except Exception:
+            bracket = None
+        board = md3_board(conn, bracket)
     except Exception:
         return []
     live = [b for b in board if b.get("state") != "待前两轮"]
