@@ -63,6 +63,18 @@ def _final_rank(base: dict, results: list[tuple]) -> list[str]:
     return sorted(tbl, key=lambda c: (-tbl[c]["pts"], -tbl[c]["gd"], -tbl[c]["gf"]))
 
 
+def _seeding_live(base, fh, fa, oh, oa, team) -> bool:
+    """Does THIS match's result still change `team`'s final group position? Holding the
+    other MD3 match fixed, if varying fh-fa's result moves team's rank, its seeding is
+    live — two already-qualified teams playing each other for top spot (→ better R32
+    draw) are NOT a walkover, even though both are 'secured' for top-2."""
+    for oo in "HDA":
+        ranks = {_final_rank(base, [(fh, fa, fo), (oh, oa, oo)]).index(team) for fo in "HDA"}
+        if len(ranks) > 1:
+            return True
+    return False
+
+
 def _team_state(base, fh, fa, oh, oa, team) -> str:
     """secured / third_safe / draw_ok / must_win / dead / live, by enumerating the 9
     MD3 outcome combos for top-2, then third-place math for teams that can't make top-2."""
@@ -147,7 +159,13 @@ def md3_board(conn) -> list[dict]:
         oh, oa = other[0]
         sa = _team_state(st, fh, fa, oh, oa, fh)
         sb = _team_state(st, fh, fa, oh, oa, fa)
-        label, lean, note = _fixture_call(sa, sb)
+        # 两队都已锁前2,但若小组头名仍在这场之间未决(影响R32签位)→ 争头名,非走过场
+        if sa == "secured" and sb == "secured" and (
+                _seeding_live(st, fh, fa, oh, oa, fh) or _seeding_live(st, fh, fa, oh, oa, fa)):
+            label, lean, note = ("争头名", "neutral",
+                "双方已出线但仍争小组头名(头名→R32签位更优)→ 都有动力赢,非走过场")
+        else:
+            label, lean, note = _fixture_call(sa, sb)
         out.append({"group": g, "home": fh, "away": fa, "date": r["d"],
                     "state": label, "lean": lean, "note": note, "sa": sa, "sb": sb})
     return out
